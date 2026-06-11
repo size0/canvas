@@ -82,7 +82,7 @@ export const ChangeAnglePanel: React.FC<ChangeAnglePanelProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between mb-3">
                 <span className={`text-sm font-medium ${isDark ? 'text-white' : 'text-neutral-900'}`}>
-                    3D Camera Control
+                    3D 机位控制
                 </span>
                 <div className="flex items-center gap-2">
                     <button
@@ -90,7 +90,7 @@ export const ChangeAnglePanel: React.FC<ChangeAnglePanelProps> = ({
                         className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-lg transition-colors ${isDark ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-500 hover:text-neutral-900'}`}
                     >
                         <RotateCcw size={12} />
-                        Reset
+                        重置
                     </button>
                     <button
                         onClick={onClose}
@@ -126,7 +126,7 @@ export const ChangeAnglePanel: React.FC<ChangeAnglePanelProps> = ({
                 {isLoading ? (
                     <>
                         <div className="w-4 h-4 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin" />
-                        Generating...
+                        生成中…
                     </>
                 ) : (
                     <>
@@ -140,7 +140,7 @@ export const ChangeAnglePanel: React.FC<ChangeAnglePanelProps> = ({
                             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                             <circle cx="12" cy="13" r="4" />
                         </svg>
-                        Generate New Angle
+                        生成新角度
                     </>
                 )}
             </button>

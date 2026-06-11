@@ -1,3 +1,15 @@
+Magical Canvas
+Copyright 2026 Magical Canvas Contributors
+
+This product is a derivative work of TwitCanva-Video-Workflow
+(https://github.com/SankaiAI/TwitCanva-Video-Workflow), and contains
+substantial modifications including a built-in video editing studio,
+full Chinese localization, an Electron desktop shell, and a unified
+OpenAI-compatible model configuration system.
+
+--------------------------------------------------------------------
+Original NOTICE from the upstream project:
+
 TwitCanva
 Copyright 2025 SankaiAI
 

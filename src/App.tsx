@@ -44,14 +44,13 @@ import { ImageEditorModal } from './components/modals/ImageEditorModal';
 import { VideoEditorModal } from './components/modals/VideoEditorModal';
 import { ExpandedMediaModal } from './components/modals/ExpandedMediaModal';
 import { CreateAssetModal } from './components/modals/CreateAssetModal';
-import { TikTokImportModal } from './components/modals/TikTokImportModal';
-import { TwitterPostModal } from './components/modals/TwitterPostModal';
-import { TikTokPostModal } from './components/modals/TikTokPostModal';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
-import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
+import { VideoStudioPage } from './components/videoStudio/VideoStudioPage';
+import { AppDialogHost } from './components/ui/AppDialog';
+import { DesktopTitleBar } from './components/ui/DesktopTitleBar';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -297,8 +296,8 @@ export default function App() {
     setNodes([]);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
-    setCanvasTitle('Untitled Canvas');
-    setEditingTitleValue('Untitled Canvas');
+    setCanvasTitle('未命名画布');
+    setEditingTitleValue('未命名画布');
     resetWorkflowId(); // Important: ensures new workflow gets a new ID
     setIsDirty(false);
   };
@@ -397,18 +396,8 @@ export default function App() {
     updateNode
   });
 
-  // TikTok Import Tool
-  const {
-    isModalOpen: isTikTokModalOpen,
-    openModal: openTikTokModal,
-    closeModal: closeTikTokModal,
-    handleVideoImported: handleTikTokVideoImported
-  } = useTikTokImport({
-    nodes,
-    setNodes,
-    setSelectedNodeIds,
-    viewport
-  });
+  // Video Studio (视频剪辑)
+  const [isVideoStudioOpen, setIsVideoStudioOpen] = useState(false);
 
   // Storyboard Generator Tool
   const handleCreateStoryboardNodes = React.useCallback((
@@ -591,36 +580,6 @@ export default function App() {
 
   }, [storyboardVideoModal.nodes, setNodes]);
 
-  // Twitter Post Modal State
-  const [twitterModal, setTwitterModal] = useState<{
-    isOpen: boolean;
-    mediaUrl: string | null;
-    mediaType: 'image' | 'video';
-  }>({ isOpen: false, mediaUrl: null, mediaType: 'image' });
-
-  const handlePostToX = React.useCallback((nodeId: string, mediaUrl: string, mediaType: 'image' | 'video') => {
-    console.log('[Twitter] Opening post modal for:', nodeId, mediaUrl, mediaType);
-    setTwitterModal({
-      isOpen: true,
-      mediaUrl,
-      mediaType
-    });
-  }, []);
-
-  // TikTok Post Modal State
-  const [tiktokModal, setTiktokModal] = useState<{
-    isOpen: boolean;
-    mediaUrl: string | null;
-  }>({ isOpen: false, mediaUrl: null });
-
-  const handlePostToTikTok = React.useCallback((nodeId: string, mediaUrl: string) => {
-    console.log('[TikTok] Opening post modal for:', nodeId, mediaUrl);
-    setTiktokModal({
-      isOpen: true,
-      mediaUrl
-    });
-  }, []);
-
   // Context menu handlers
   const {
     handleDoubleClick,
@@ -763,7 +722,7 @@ export default function App() {
   };
 
   const handleLibrarySelect = (url: string, type: 'image' | 'video') => {
-    handleSelectAsset(type === 'image' ? 'images' : 'videos', url, 'Asset Library Item');
+    handleSelectAsset(type === 'image' ? 'images' : 'videos', url, '素材库项目');
     closeAssetLibrary();
   };
 
@@ -786,6 +745,17 @@ export default function App() {
 
     canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', handleNativeWheel);
+  }, []);
+
+  // 防止把文件拖进窗口时浏览器/Electron 直接打开该文件（覆盖整个应用页面）
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
   }, []);
 
   // Keyboard shortcuts (handleCopy, handlePaste, handleDuplicate) provided by useKeyboardShortcuts hook
@@ -922,14 +892,16 @@ export default function App() {
 
   return (
     <div className={`w-screen h-screen ${canvasTheme === 'dark' ? 'bg-[#050505] text-white' : 'bg-neutral-50 text-neutral-900'} overflow-hidden select-none font-sans transition-colors duration-300`}>
-      {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
+      {/* 桌面端无边框窗口标题栏 */}
+      <DesktopTitleBar />
+      {!storyboardGenerator.isModalOpen && (
         <Toolbar
           onAddClick={handleToolbarAdd}
           onWorkflowsClick={handleWorkflowsClick}
           onHistoryClick={handleHistoryClick}
           onAssetsClick={handleAssetsClick}
-          onTikTokClick={openTikTokModal}
           onStoryboardClick={storyboardGenerator.openModal}
+          onVideoStudioClick={() => setIsVideoStudioOpen(true)}
           onToolsOpen={() => {
             closeWorkflowPanel();
             closeHistoryPanel();
@@ -974,28 +946,6 @@ export default function App() {
         onSave={handleSaveAssetToLibrary}
       />
 
-      {/* TikTok Import Modal */}
-      <TikTokImportModal
-        isOpen={isTikTokModalOpen}
-        onClose={closeTikTokModal}
-        onVideoImported={handleTikTokVideoImported}
-      />
-
-      {/* Twitter Post Modal */}
-      <TwitterPostModal
-        isOpen={twitterModal.isOpen}
-        onClose={() => setTwitterModal(prev => ({ ...prev, isOpen: false }))}
-        mediaUrl={twitterModal.mediaUrl}
-        mediaType={twitterModal.mediaType}
-      />
-
-      {/* TikTok Post Modal */}
-      <TikTokPostModal
-        isOpen={tiktokModal.isOpen}
-        onClose={() => setTiktokModal(prev => ({ ...prev, isOpen: false }))}
-        mediaUrl={tiktokModal.mediaUrl}
-      />
-
       {/* Storyboard Generator Modal */}
       <StoryboardGeneratorModal
         isOpen={storyboardGenerator.isModalOpen}
@@ -1015,7 +965,7 @@ export default function App() {
       />
 
       {/* Agent Chat */}
-      {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
+      {!storyboardGenerator.isModalOpen && (
         <>
           <ChatBubble onClick={toggleChat} isOpen={isChatOpen} />
           <ChatPanel isOpen={isChatOpen} onClose={closeChat} isDraggingNode={isDraggingNodeToChat} canvasTheme={canvasTheme} />
@@ -1023,8 +973,7 @@ export default function App() {
       )}
 
       {/* Top Bar */}
-      {/* Top Bar */}
-      {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
+      {!storyboardGenerator.isModalOpen && (
         <TopBar
           canvasTitle={canvasTitle}
           isEditingTitle={isEditingTitle}
@@ -1164,8 +1113,6 @@ export default function App() {
                 onMouseEnter={() => setCanvasHoveredNodeId(node.id)}
                 onMouseLeave={() => setCanvasHoveredNodeId(null)}
                 canvasTheme={canvasTheme}
-                onPostToX={handlePostToX}
-                onPostToTikTok={handlePostToTikTok}
               />
             ))}
           </div>
@@ -1277,10 +1224,9 @@ export default function App() {
       />
 
       {/* Zoom Slider */}
-      {/* Zoom Slider */}
-      {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
+      {!storyboardGenerator.isModalOpen && (
         <div className={`fixed bottom-6 left-16 rounded-full px-4 py-2 flex items-center gap-3 z-50 transition-colors duration-300 ${canvasTheme === 'dark' ? 'bg-neutral-900 border border-neutral-700' : 'bg-white/90 backdrop-blur-sm border border-neutral-200'}`} >
-          <span className={`text-xs ${canvasTheme === 'dark' ? 'text-neutral-400' : 'text-neutral-500'}`}>Zoom</span>
+          <span className={`text-xs ${canvasTheme === 'dark' ? 'text-neutral-400' : 'text-neutral-500'}`}>缩放</span>
           <input
             type="range"
             min="0.1"
@@ -1397,6 +1343,15 @@ export default function App() {
         mediaUrl={expandedImageUrl}
         onClose={handleCloseExpand}
       />
+
+      {/* 视频剪辑工作室 */}
+      <VideoStudioPage
+        isOpen={isVideoStudioOpen}
+        onClose={() => setIsVideoStudioOpen(false)}
+      />
+
+      {/* 全局统一提示框 */}
+      <AppDialogHost />
     </div >
   );
 }

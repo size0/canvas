@@ -6,8 +6,9 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Trash2, FileText, Loader2, Maximize2, Pencil, Check } from 'lucide-react';
+import { X, Trash2, FileText, Loader2, Maximize2, Pencil, Check, Upload } from 'lucide-react';
 import { LazyImage } from './LazyImage';
+import { showAppAlert } from './ui/AppDialog';
 
 interface WorkflowSummary {
     id: string;
@@ -73,7 +74,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     const fetchWorkflows = async () => {
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:3001/api/workflows');
+            const response = await fetch('http://localhost:3501/api/workflows');
             if (response.ok) {
                 const data = await response.json();
                 setWorkflows(data);
@@ -87,7 +88,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
 
     const fetchPublicWorkflows = async () => {
         try {
-            const response = await fetch('http://localhost:3001/api/public-workflows');
+            const response = await fetch('http://localhost:3501/api/public-workflows');
             if (response.ok) {
                 const data = await response.json();
                 setPublicWorkflows(data);
@@ -97,9 +98,41 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         }
     };
 
+    const importInputRef = useRef<HTMLInputElement>(null);
+    const [importing, setImporting] = useState(false);
+
+    const handleImportWorkflow = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setImporting(true);
+        try {
+            const text = await file.text();
+            const workflow = JSON.parse(text);
+            // 作为新的「我的工作流」导入：分配新 ID，标题缺省用文件名
+            workflow.id = (crypto as any).randomUUID ? crypto.randomUUID() : `wf_${Date.now()}`;
+            if (!workflow.title) {
+                workflow.title = file.name.replace(/\.json$/i, '');
+            }
+            const response = await fetch('http://localhost:3501/api/workflows', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(workflow)
+            });
+            if (!response.ok) throw new Error('导入失败');
+            setActiveTab('my');
+            await fetchWorkflows();
+        } catch (err) {
+            console.error('Import workflow failed:', err);
+            showAppAlert('导入失败：文件不是有效的工作流 JSON');
+        } finally {
+            setImporting(false);
+            if (importInputRef.current) importInputRef.current.value = '';
+        }
+    };
+
     const handleDelete = async (id: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/workflows/${id}`, {
+            const response = await fetch(`http://localhost:3501/api/workflows/${id}`, {
                 method: 'DELETE'
             });
             if (response.ok) {
@@ -143,7 +176,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         setVisibleCoverCount(COVERS_PER_PAGE); // Reset pagination
 
         try {
-            const response = await fetch('http://localhost:3001/api/assets/images');
+            const response = await fetch('http://localhost:3501/api/assets/images');
             if (response.ok) {
                 const data = await response.json();
                 setCoverAssets(data);
@@ -159,17 +192,17 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         if (!editingCoverFor) return;
 
         try {
-            const response = await fetch(`http://localhost:3001/api/workflows/${editingCoverFor}/cover`, {
+            const response = await fetch(`http://localhost:3501/api/workflows/${editingCoverFor}/cover`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ coverUrl: `http://localhost:3001${assetUrl}` })
+                body: JSON.stringify({ coverUrl: `http://localhost:3501${assetUrl}` })
             });
 
             if (response.ok) {
                 // Update local state
                 setWorkflows(prev => prev.map(w =>
                     w.id === editingCoverFor
-                        ? { ...w, coverUrl: `http://localhost:3001${assetUrl}` }
+                        ? { ...w, coverUrl: `http://localhost:3501${assetUrl}` }
                         : w
                 ));
             }
@@ -204,21 +237,39 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                             onClick={() => setActiveTab('my')}
                             className={`font-medium pb-1 transition-colors ${activeTab === 'my' ? isDark ? 'text-white border-b-2 border-white' : 'text-neutral-900 border-b-2 border-neutral-900' : isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}
                         >
-                            My Workflows
+                            我的工作流
                         </button>
                         <button
                             onClick={() => setActiveTab('public')}
                             className={`font-medium pb-1 transition-colors ${activeTab === 'public' ? isDark ? 'text-white border-b-2 border-white' : 'text-neutral-900 border-b-2 border-neutral-900' : isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}
                         >
-                            Public Workflows
+                            公共工作流
                         </button>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className={`transition-colors ${isDark ? 'text-neutral-500 hover:text-white' : 'text-neutral-400 hover:text-neutral-900'}`}
-                    >
-                        <Maximize2 size={18} />
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <input
+                            ref={importInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            onChange={handleImportWorkflow}
+                            className="hidden"
+                        />
+                        <button
+                            onClick={() => importInputRef.current?.click()}
+                            disabled={importing}
+                            className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${isDark ? 'bg-neutral-800 hover:bg-neutral-700 text-white border-neutral-700' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border-neutral-300'} disabled:opacity-50`}
+                            title="导入工作流 JSON 文件到「我的工作流」"
+                        >
+                            {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                            导入
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className={`transition-colors ${isDark ? 'text-neutral-500 hover:text-white' : 'text-neutral-400 hover:text-neutral-900'}`}
+                        >
+                            <Maximize2 size={18} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}
@@ -237,7 +288,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                         /* My Workflows Tab */
                         workflows.length === 0 ? (
                             <div className="flex items-center justify-center h-40 text-neutral-500">
-                                No workflows found
+                                未找到工作流
                             </div>
                         ) : (
                             <div className="grid grid-cols-3 gap-4">
@@ -271,7 +322,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                                 <button
                                                     onClick={(e) => openCoverEditor(workflow.id, e)}
                                                     className="p-1.5 bg-black/50 hover:bg-blue-500 rounded-lg transition-all"
-                                                    title="Edit cover"
+                                                    title="编辑封面"
                                                 >
                                                     <Pencil size={14} className="text-white" />
                                                 </button>
@@ -282,7 +333,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                                         setDeleteConfirm(workflow.id);
                                                     }}
                                                     className="p-1.5 bg-black/50 hover:bg-red-500 rounded-lg transition-all"
-                                                    title="Delete workflow"
+                                                    title="删除工作流"
                                                 >
                                                     <Trash2 size={14} className="text-white" />
                                                 </button>
@@ -290,9 +341,9 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                         </div>
                                         {/* Info */}
                                         <div className={`p-3 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
-                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || 'Untitled'}</h3>
+                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
                                             <p className={`text-xs mt-0.5 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
-                                                {workflow.nodeCount} nodes
+                                                {workflow.nodeCount} 个节点
                                             </p>
                                         </div>
                                     </div>
@@ -304,8 +355,8 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                         publicWorkflows.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-40 text-neutral-500 gap-2">
                                 <FileText size={32} className="opacity-50" />
-                                <p>No public workflows available</p>
-                                <p className="text-xs text-neutral-600">Add workflow JSONs to public/workflows/</p>
+                                <p>暂无公共工作流</p>
+                                <p className="text-xs text-neutral-600">将工作流 JSON 添加到 public/workflows/</p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-3 gap-4">
@@ -331,14 +382,14 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                             )}
                                             {/* Public badge */}
                                             <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-600/80 rounded text-[10px] font-medium text-white">
-                                                PUBLIC
+                                                公共
                                             </div>
                                         </div>
                                         {/* Info */}
                                         <div className={`p-3 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
-                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || 'Untitled'}</h3>
+                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
                                             <p className={`text-xs mt-0.5 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
-                                                {workflow.description || `${workflow.nodeCount} nodes`}
+                                                {workflow.description || `${workflow.nodeCount} 个节点`}
                                             </p>
                                         </div>
                                     </div>
@@ -353,22 +404,22 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className="bg-[#1a1a1a] border border-neutral-700 rounded-2xl p-6 w-[340px] shadow-2xl">
-                        <h3 className="text-lg font-semibold text-white mb-2">Delete Workflow</h3>
+                        <h3 className="text-lg font-semibold text-white mb-2">删除工作流</h3>
                         <p className="text-neutral-400 text-sm mb-6">
-                            Are you sure you want to delete this workflow? This action cannot be undone.
+                            确定要删除此工作流吗？此操作无法撤销。
                         </p>
                         <div className="flex gap-3 justify-end">
                             <button
                                 onClick={() => setDeleteConfirm(null)}
                                 className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white text-sm transition-colors"
                             >
-                                Cancel
+                                取消
                             </button>
                             <button
                                 onClick={() => handleDelete(deleteConfirm)}
                                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm transition-colors"
                             >
-                                Delete
+                                删除
                             </button>
                         </div>
                     </div>
@@ -380,7 +431,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className="bg-[#1a1a1a] border border-neutral-700 rounded-2xl p-6 w-[500px] max-h-[500px] shadow-2xl flex flex-col">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-white">Select Cover Image</h3>
+                            <h3 className="text-lg font-semibold text-white">选择封面图像</h3>
                             <button
                                 onClick={() => setEditingCoverFor(null)}
                                 className="p-1.5 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors"
@@ -395,7 +446,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                             </div>
                         ) : coverAssets.length === 0 ? (
                             <div className="flex items-center justify-center h-40 text-neutral-500">
-                                No images available. Generate some images first!
+                                暂无可用图像。请先生成一些图像！
                             </div>
                         ) : (
                             <div className="grid grid-cols-3 gap-3 overflow-y-auto flex-1">
@@ -406,8 +457,8 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                         className="h-32 w-full rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all relative group bg-neutral-900"
                                     >
                                         <LazyImage
-                                            src={`http://localhost:3001${asset.url}`}
-                                            alt="Cover option"
+                                            src={`http://localhost:3501${asset.url}`}
+                                            alt="封面选项"
                                             className="w-full h-full"
                                             placeholderClassName="rounded-lg"
                                             rootMargin="100px"
@@ -425,7 +476,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                         className="col-span-3 flex items-center justify-center py-4"
                                     >
                                         <Loader2 className="animate-spin text-neutral-500" size={20} />
-                                        <span className="ml-2 text-neutral-500 text-sm">Loading more...</span>
+                                        <span className="ml-2 text-neutral-500 text-sm">加载更多...</span>
                                     </div>
                                 )}
                             </div>

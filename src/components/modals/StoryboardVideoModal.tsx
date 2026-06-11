@@ -34,6 +34,12 @@ const VIDEO_DURATIONS = [5, 6, 8, 10];
 const VIDEO_RESOLUTIONS = ["Auto", "1080p", "768p", "720p", "512p"];
 
 const VIDEO_MODELS = [
+    // gpt2api.com 视频模型
+    { id: 'grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', recommended: true, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'] },
+    { id: 'sora', name: 'Sora 2', provider: 'gpt2api', durations: [4, 8, 12], resolutions: ['720p', '1080p'] },
+    { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
+    { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
+    { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
     {
         id: 'veo-3.1',
         name: 'Veo 3.1',
@@ -79,8 +85,8 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
 
     const [prompts, setPrompts] = useState<Record<string, string>>({});
     const [settings, setSettings] = useState({
-        model: 'veo-3.1',
-        duration: 4, // Default to 4s for Veo
+        model: 'grok-imagine-video',
+        duration: 6, // gpt2api Grok 默认 6s
         resolution: '720p' // Safe default
     });
     const [generatingPrompts, setGeneratingPrompts] = useState<Record<string, boolean>>({});
@@ -289,8 +295,8 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                             <Film size={20} className="text-white" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-semibold text-white">Create Story Videos</h2>
-                            <p className="text-xs text-neutral-500">Generate video clips for each scene</p>
+                            <h2 className="text-lg font-semibold text-white">创建故事视频</h2>
+                            <p className="text-xs text-neutral-500">为每个场景生成视频片段</p>
                         </div>
                     </div>
                     <button
@@ -305,7 +311,7 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {sortedScenes.length === 0 ? (
                         <div className="text-center text-neutral-500 py-12">
-                            No scenes available or all selected scenes removed.
+                            没有可用场景，或所有已选场景均已移除。
                         </div>
                     ) : (
                         sortedScenes.map((scene, index) => (
@@ -314,7 +320,7 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                 <button
                                     onClick={() => handleRemoveScene(scene.id)}
                                     className="p-2 text-neutral-600 hover:text-red-400 hover:bg-neutral-800/50 rounded-full transition-all opacity-0 group-hover/card:opacity-100 flex-shrink-0"
-                                    title="Remove scene"
+                                    title="移除场景"
                                 >
                                     <Trash2 size={16} />
                                 </button>
@@ -325,30 +331,30 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                         {scene.resultUrl ? (
                                             <img src={scene.resultUrl} alt={`Scene ${index + 1}`} className="w-full h-full object-cover" />
                                         ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-neutral-700">No Image</div>
+                                            <div className="w-full h-full flex items-center justify-center text-neutral-700">无图像</div>
                                         )}
                                         <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 backdrop-blur-md rounded text-[10px] font-medium text-white border border-white/10">
-                                            Scene {index + 1}
+                                            场景 {index + 1}
                                         </div>
                                     </div>
 
                                     {/* Prompt Input Area */}
                                     <div className="flex-1 flex flex-col gap-2 relative">
                                         <div className="flex justify-between items-center">
-                                            <label className="text-xs font-medium text-neutral-400">Video Prompt</label>
+                                            <label className="text-xs font-medium text-neutral-400">视频提示词</label>
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     onClick={() => handleOptimizePrompt(scene.id)}
                                                     disabled={generatingPrompts[scene.id] || optimizingPrompts[scene.id] || !prompts[scene.id]}
                                                     className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
-                                                    title="Enhance your prompt with AI"
+                                                    title="使用 AI 增强你的提示词"
                                                 >
                                                     {optimizingPrompts[scene.id] ? (
                                                         <Loader2 size={12} className="animate-spin" />
                                                     ) : (
                                                         <Wand2 size={12} />
                                                     )}
-                                                    Optimize
+                                                    优化
                                                 </button>
                                             </div>
                                         </div>
@@ -356,7 +362,7 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                             <textarea
                                                 value={prompts[scene.id] || ''}
                                                 onChange={(e) => setPrompts(prev => ({ ...prev, [scene.id]: e.target.value }))}
-                                                placeholder="Describe the motion for this scene (e.g., 'Slow pan right, character smiles')..."
+                                                placeholder="描述该场景的运镜动作（例如：'缓慢右摇，角色微笑'）..."
                                                 className="w-full h-full min-h-[100px] bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-neutral-200 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 resize-none"
                                             />
 
@@ -373,7 +379,7 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                                         ) : (
                                                             <Sparkles size={14} />
                                                         )}
-                                                        <span className="text-sm font-medium">Auto-Generate</span>
+                                                        <span className="text-sm font-medium">自动生成</span>
                                                     </button>
                                                 </div>
                                             )}
@@ -392,7 +398,7 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                         <div className="flex items-center gap-4">
                             {/* Model Selector */}
                             <div className="flex flex-col gap-1" ref={modelDropdownRef}>
-                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">Model</label>
+                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">模型</label>
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowModelDropdown(!showModelDropdown)}
@@ -412,8 +418,27 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                     {showModelDropdown && (
                                         <div className="absolute bottom-full mb-2 left-0 w-64 bg-[#1f1f1f] border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[400px] overflow-y-auto">
 
+                                            {/* gpt2api */}
+                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a]">gpt2api</div>
+                                            {VIDEO_MODELS.filter(m => m.provider === 'gpt2api').map(model => (
+                                                <button
+                                                    key={model.id}
+                                                    onClick={() => handleModelChange(model.id)}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs hover:bg-[#2a2a2a] transition-colors ${settings.model === model.id ? 'text-blue-400 bg-blue-500/10' : 'text-neutral-300'}`}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <Film size={14} className={settings.model === model.id ? 'text-blue-400' : 'text-neutral-400'} />
+                                                        {model.name}
+                                                        {model.recommended && (
+                                                            <span className="text-[9px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded font-medium">REC</span>
+                                                        )}
+                                                    </div>
+                                                    {settings.model === model.id && <Check size={14} />}
+                                                </button>
+                                            ))}
+
                                             {/* Google */}
-                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a]">Google</div>
+                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a] border-t border-neutral-700">Google</div>
                                             {VIDEO_MODELS.filter(m => m.provider === 'google').map(model => (
                                                 <button
                                                     key={model.id}
@@ -469,21 +494,21 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
 
                             {/* Duration Selector - Dynamic based on model */}
                             <div className="flex flex-col gap-1">
-                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">Duration</label>
+                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">时长</label>
                                 <select
                                     value={settings.duration}
                                     onChange={(e) => setSettings(prev => ({ ...prev, duration: Number(e.target.value) }))}
                                     className="bg-neutral-800 text-white text-xs px-3 py-2 rounded-lg border border-neutral-700 focus:outline-none focus:border-purple-500 min-w-[80px]"
                                 >
                                     {currentModel.durations.map(d => (
-                                        <option key={d} value={d}>{d}s</option>
+                                        <option key={d} value={d}>{d}秒</option>
                                     ))}
                                 </select>
                             </div>
 
                             {/* Resolution Selector */}
                             <div className="flex flex-col gap-1">
-                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">Resolution</label>
+                                <label className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">分辨率</label>
                                 <select
                                     value={settings.resolution}
                                     onChange={(e) => setSettings(prev => ({ ...prev, resolution: e.target.value }))}
@@ -499,15 +524,15 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                         {/* Generate Action */}
                         <div className="flex items-center gap-3">
                             <div className="text-right mr-2">
-                                <div className="text-xs text-neutral-400">Est. cost</div>
-                                <div className="text-sm font-medium text-white">~{(sortedScenes.length * 0.1 * (settings.duration / 5)).toFixed(2)} credits</div>
+                                <div className="text-xs text-neutral-400">预计消耗</div>
+                                <div className="text-sm font-medium text-white">~{(sortedScenes.length * 0.1 * (settings.duration / 5)).toFixed(2)} 积分</div>
                             </div>
                             <button
                                 onClick={() => onCreateVideos(prompts, settings, sortedScenes.map(s => s.id))}
                                 className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white pl-4 pr-5 py-2.5 rounded-xl text-sm font-medium transition-all shadow-lg shadow-purple-900/40 flex items-center gap-2"
                             >
                                 <Play size={16} fill="currentColor" />
-                                Generate Story Videos
+                                生成故事视频
                             </button>
                         </div>
                     </div>

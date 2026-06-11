@@ -7,24 +7,9 @@ import {
   Wrench,
   MoreHorizontal,
   Plus,
-  Film
+  Film,
+  Scissors
 } from 'lucide-react';
-
-// ============================================================================
-// TIKTOK ICON COMPONENT
-// ============================================================================
-
-const TikTokIcon: React.FC<{ size?: number; className?: string }> = ({ size = 20, className }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    className={className}
-  >
-    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
-  </svg>
-);
 
 // ============================================================================
 // TYPES
@@ -35,8 +20,8 @@ interface ToolbarProps {
   onWorkflowsClick?: (e: React.MouseEvent) => void;
   onHistoryClick?: (e: React.MouseEvent) => void;
   onAssetsClick?: (e: React.MouseEvent) => void;
-  onTikTokClick?: (e: React.MouseEvent) => void;
   onStoryboardClick?: (e: React.MouseEvent) => void;
+  onVideoStudioClick?: (e: React.MouseEvent) => void;
   onToolsOpen?: () => void; // Called when tools dropdown opens to close other panels
   canvasTheme?: 'dark' | 'light';
 }
@@ -50,8 +35,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onWorkflowsClick,
   onHistoryClick,
   onAssetsClick,
-  onTikTokClick,
   onStoryboardClick,
+  onVideoStudioClick,
   onToolsOpen,
   canvasTheme = 'dark'
 }) => {
@@ -99,14 +84,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`hover:scale-125 transition-all duration-200 ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
             }`}
           onClick={onWorkflowsClick}
-          title="My Workflows"
+          title="我的工作流"
         >
           <LayoutGrid size={20} />
         </button>
         <button
           className={`hover:scale-125 transition-all duration-200 ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
             }`}
-          title="Assets"
+          title="素材"
           onClick={onAssetsClick}
         >
           <ImageIcon size={20} />
@@ -115,7 +100,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`hover:scale-125 transition-all duration-200 ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
             }`}
           onClick={onHistoryClick}
-          title="History"
+          title="历史"
         >
           <History size={20} />
         </button>
@@ -133,7 +118,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               }
               setIsToolsOpen(!isToolsOpen);
             }}
-            title="Tools"
+            title="工具"
           >
             <Wrench size={20} />
           </button>
@@ -142,20 +127,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {isToolsOpen && (
             <div className={`absolute left-10 top-0 rounded-lg shadow-2xl py-2 min-w-[240px] z-50 ${isDark ? 'bg-[#1a1a1a] border border-neutral-700' : 'bg-white border border-neutral-200'
               }`}>
-              <button
-                onClick={handleToolClick(onTikTokClick)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 transition-colors group ${isDark ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
-                  }`}
-              >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-neutral-800' : 'bg-neutral-200'}`}>
-                  <TikTokIcon size={16} className={isDark ? 'text-white' : 'text-neutral-700'} />
-                </div>
-                <div className="text-left">
-                  <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>Import TikTok</p>
-                  <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>Download without watermark</p>
-                </div>
-              </button>
-
               {/* Storyboard Generator */}
               <button
                 onClick={handleToolClick(onStoryboardClick)}
@@ -166,20 +137,30 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   <Film size={16} className={isDark ? 'text-white' : 'text-neutral-700'} />
                 </div>
                 <div className="text-left">
-                  <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>Storyboard Generator</p>
-                  <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>Create scenes with AI</p>
+                  <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>分镜生成器</p>
+                  <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>用 AI 创建场景</p>
                 </div>
               </button>
             </div>
           )}
         </div>
+
+        {/* Video Studio (视频剪辑) */}
+        <button
+          className={`hover:scale-125 transition-all duration-200 ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
+            }`}
+          onClick={onVideoStudioClick}
+          title="视频剪辑"
+        >
+          <Scissors size={20} />
+        </button>
       </div>
 
       <div className={`w-8 h-[1px] my-1 ${isDark ? 'bg-neutral-800' : 'bg-neutral-200'}`}></div>
 
       <button className={`w-8 h-8 rounded-full overflow-hidden mb-2 hover:scale-110 transition-all duration-200 ${isDark ? 'border border-neutral-700' : 'border border-neutral-300'
         }`}>
-        <img src="https://picsum.photos/40/40" alt="Profile" className="w-full h-full object-cover" />
+        <img src="https://picsum.photos/40/40" alt="头像" className="w-full h-full object-cover" />
       </button>
     </div>
   );

@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Electron 打包产物与本地密钥配置
+release/
+twitcanva-config.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

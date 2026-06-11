@@ -76,7 +76,7 @@ export interface ImageEditorModalProps {
 export interface ImageModel {
     id: string;
     name: string;
-    provider: 'google' | 'kling' | 'openai';
+    provider: 'google' | 'kling' | 'openai' | 'gpt2api';
     supportsImageToImage: boolean;
     supportsMultiImage: boolean;
     recommended?: boolean;
@@ -94,6 +94,11 @@ export interface ImageModel {
  * Note: Kling V2/V2.1 only support references via Multi-Image API
  */
 export const IMAGE_MODELS: ImageModel[] = [
+    // gpt2api.com 图像模型
+    { id: 'nano-banana-pro', name: 'Nano Banana Pro', provider: 'gpt2api', supportsImageToImage: true, supportsMultiImage: true, recommended: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
+    { id: 'nano-banana-v2', name: 'Nano Banana V2', provider: 'gpt2api', supportsImageToImage: true, supportsMultiImage: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
+    { id: 'nano-banana', name: 'Nano Banana', provider: 'gpt2api', supportsImageToImage: true, supportsMultiImage: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
+    { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'gpt2api', supportsImageToImage: true, supportsMultiImage: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
     { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai', supportsImageToImage: true, supportsMultiImage: true, recommended: true, resolutions: ["Auto", "1K", "2K", "4K"], aspectRatios: ["Auto", "1024x1024", "1536x1024", "1024x1536"] },
     { id: 'gemini-pro', name: 'Nano Banana Pro', provider: 'google', supportsImageToImage: true, supportsMultiImage: true, resolutions: ["1K", "2K", "4K"], aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9"] },
     // Kling AI models - Consolidated: removed legacy v1, v2, v2-new

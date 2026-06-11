@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 
-export const useCanvasTitle = (initialTitle: string = 'Untitled') => {
+export const useCanvasTitle = (initialTitle: string = '未命名') => {
     const [canvasTitle, setCanvasTitle] = useState(initialTitle);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [editingTitleValue, setEditingTitleValue] = useState(initialTitle);

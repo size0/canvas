@@ -89,8 +89,8 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
         try {
             // Fetch counts in parallel
             const [imgRes, vidRes] = await Promise.all([
-                fetch('http://localhost:3001/api/assets/images?limit=1'),
-                fetch('http://localhost:3001/api/assets/videos?limit=1')
+                fetch('http://localhost:3501/api/assets/images?limit=1'),
+                fetch('http://localhost:3501/api/assets/videos?limit=1')
             ]);
 
             if (imgRes.ok) {
@@ -139,7 +139,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
 
         try {
             const response = await fetch(
-                `http://localhost:3001/api/assets/${activeTab}?limit=${PAGE_SIZE}&offset=${pageOffset}`
+                `http://localhost:3501/api/assets/${activeTab}?limit=${PAGE_SIZE}&offset=${pageOffset}`
             );
             if (response.ok) {
                 const data = await response.json();
@@ -179,7 +179,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
 
     const handleDelete = async (id: string) => {
         try {
-            const response = await fetch(`http://localhost:3001/api/assets/${activeTab}/${id}`, {
+            const response = await fetch(`http://localhost:3501/api/assets/${activeTab}/${id}`, {
                 method: 'DELETE'
             });
             if (response.ok) {
@@ -199,7 +199,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
 
     const handleSelectAsset = (asset: AssetMetadata) => {
         // Construct full URL for the asset
-        const fullUrl = `http://localhost:3001${asset.url}`;
+        const fullUrl = `http://localhost:3501${asset.url}`;
         onSelectAsset(activeTab, fullUrl, asset.prompt || '', asset.model);
     };
 
@@ -237,7 +237,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                             onClick={() => setActiveTab('images')}
                         >
                             <ImageIcon size={16} />
-                            Image History ({imageTotalCount})
+                            图像历史 ({imageTotalCount})
                         </button>
                         <button
                             className={`text-sm font-medium transition-colors pb-1 flex items-center gap-2 ${activeTab === 'videos'
@@ -247,7 +247,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                             onClick={() => setActiveTab('videos')}
                         >
                             <Video size={16} />
-                            Video History ({videoTotalCount})
+                            视频历史 ({videoTotalCount})
                         </button>
                     </div>
                     <button
@@ -276,8 +276,8 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                             <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-3 ${isDark ? 'bg-neutral-800' : 'bg-neutral-100'}`}>
                                 {activeTab === 'images' ? <ImageIcon size={24} /> : <Video size={24} />}
                             </div>
-                            <p>No {activeTab} found</p>
-                            <p className="text-xs mt-1">Generated {activeTab} will appear here</p>
+                            <p>{activeTab === 'images' ? '未找到图像' : '未找到视频'}</p>
+                            <p className="text-xs mt-1">{activeTab === 'images' ? '生成的图像会显示在这里' : '生成的视频会显示在这里'}</p>
                         </div>
                     ) : (
                         <div className="space-y-6">
@@ -293,14 +293,14 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                                             >
                                                 {activeTab === 'images' ? (
                                                     <img
-                                                        src={`http://localhost:3001${asset.url}`}
-                                                        alt={asset.prompt || 'Generated image'}
+                                                        src={`http://localhost:3501${asset.url}`}
+                                                        alt={asset.prompt || '生成的图像'}
                                                         className="w-full h-full object-cover"
                                                         loading="lazy"
                                                     />
                                                 ) : (
                                                     <video
-                                                        src={`http://localhost:3001${asset.url}`}
+                                                        src={`http://localhost:3501${asset.url}`}
                                                         className="w-full h-full object-cover"
                                                         muted
                                                         preload="metadata"
@@ -347,22 +347,22 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className={`border rounded-2xl p-6 w-[340px] shadow-2xl ${isDark ? 'bg-[#1a1a1a] border-neutral-700' : 'bg-white border-neutral-200'}`}>
-                        <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>Delete Asset</h3>
+                        <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>删除素材</h3>
                         <p className={`text-sm mb-6 ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
-                            Are you sure you want to delete this {activeTab === 'images' ? 'image' : 'video'}? This action cannot be undone.
+                            确定要删除此{activeTab === 'images' ? '图像' : '视频'}吗？此操作无法撤销。
                         </p>
                         <div className="flex gap-3 justify-end">
                             <button
                                 onClick={() => setDeleteConfirm(null)}
                                 className={`px-4 py-2 rounded-lg text-sm transition-colors ${isDark ? 'bg-neutral-800 hover:bg-neutral-700 text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-900'}`}
                             >
-                                Cancel
+                                取消
                             </button>
                             <button
                                 onClick={() => handleDelete(deleteConfirm)}
                                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm transition-colors"
                             >
-                                Delete
+                                删除
                             </button>
                         </div>
                     </div>

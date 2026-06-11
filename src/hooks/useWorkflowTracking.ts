@@ -70,8 +70,8 @@ export const useWorkflowTracking = ({
     const handleNewCanvas = useCallback(() => {
         setNodes([]);
         setSelectedNodeIds([]);
-        setCanvasTitle('Untitled Canvas');
-        setEditingTitleValue('Untitled Canvas');
+        setCanvasTitle('未命名画布');
+        setEditingTitleValue('未命名画布');
         resetWorkflowId();
         setIsDirty(false);
     }, [setNodes, setSelectedNodeIds, setCanvasTitle, setEditingTitleValue, resetWorkflowId]);

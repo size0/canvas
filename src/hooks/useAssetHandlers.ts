@@ -8,6 +8,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport, ContextMenuState } from '../types';
+import { showAppAlert } from '../components/ui/AppDialog';
 
 interface UseAssetHandlersOptions {
     nodes: NodeData[];
@@ -165,7 +166,7 @@ export const useAssetHandlers = ({
             setNodeToSnapshot(node);
             setIsCreateAssetModalOpen(true);
         } else {
-            alert("Please select an Image or Video node to create an asset.");
+            showAppAlert("请选择图像或视频节点以创建素材。");
         }
     }, [nodes]);
 
@@ -176,7 +177,7 @@ export const useAssetHandlers = ({
         if (!nodeToSnapshot?.resultUrl) return;
 
         try {
-            const response = await fetch('http://localhost:3001/api/library', {
+            const response = await fetch('http://localhost:3501/api/library', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -206,7 +207,7 @@ export const useAssetHandlers = ({
 
         // Check file size (server limit 100MB)
         if (file.size > 100 * 1024 * 1024) {
-            alert("File is too large. Maximum size is 100MB.");
+            showAppAlert("文件过大。最大支持 100MB。");
             return;
         }
 
@@ -288,7 +289,7 @@ export const useAssetHandlers = ({
 
             } catch (error) {
                 console.error("Upload failed:", error);
-                alert("Failed to upload file to server.");
+                showAppAlert("上传文件到服务器失败。");
             }
         };
         reader.readAsDataURL(file);

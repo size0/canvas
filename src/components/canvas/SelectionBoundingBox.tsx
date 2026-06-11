@@ -307,7 +307,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                             <rect x="14" y="14" width="7" height="7" />
                             <rect x="3" y="14" width="7" height="7" />
                         </svg>
-                        Group
+                        编组
                     </button>
                 </div>
             )}
@@ -334,7 +334,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                                 <line x1="4" y1="12" x2="16" y2="12" />
                                 <line x1="4" y1="18" x2="12" y2="18" />
                             </svg>
-                            Sort
+                            排序
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <polyline points="6 9 12 15 18 9" />
                             </svg>
@@ -353,7 +353,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                                         <line x1="4" y1="12" x2="20" y2="12" />
                                         <polyline points="14 6 20 12 14 18" />
                                     </svg>
-                                    Horizontal
+                                    水平
                                 </button>
                                 <button
                                     onClick={() => {
@@ -366,7 +366,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                                         <line x1="12" y1="4" x2="12" y2="20" />
                                         <polyline points="6 14 12 20 18 14" />
                                     </svg>
-                                    Vertical
+                                    垂直
                                 </button>
                                 <button
                                     onClick={() => {
@@ -381,7 +381,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                                         <rect x="3" y="14" width="7" height="7" />
                                         <rect x="14" y="14" width="7" height="7" />
                                     </svg>
-                                    Grid (3 cols)
+                                    网格（3 列）
                                 </button>
                             </div>
                         )}
@@ -399,7 +399,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                             <rect x="3" y="14" width="7" height="7" />
                             <line x1="3" y1="3" x2="21" y2="21" />
                         </svg>
-                        Ungroup
+                        取消编组
                     </button>
 
                     {/* Edit Storyboard Button (only for storyboards) */}
@@ -415,7 +415,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
-                            Edit Storyboard
+                            编辑分镜
                         </button>
                     )}
 
@@ -431,7 +431,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                             <path d="M15 10l5 5-5 5" />
                             <path d="M4 4v16" />
                         </svg>
-                        Create Videos
+                        生成视频
                     </button>
                 </div>
             )}

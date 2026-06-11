@@ -59,7 +59,7 @@ export const useWorkflow = ({
                 viewport
             };
 
-            const response = await fetch('http://localhost:3001/api/workflows', {
+            const response = await fetch('http://localhost:3501/api/workflows', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(workflow)
@@ -86,8 +86,8 @@ export const useWorkflow = ({
             const isPublic = id.startsWith('public:');
             const workflowId = isPublic ? id.replace('public:', '') : id;
             const endpoint = isPublic
-                ? `http://localhost:3001/api/public-workflows/${workflowId}`
-                : `http://localhost:3001/api/workflows/${workflowId}`;
+                ? `http://localhost:3501/api/public-workflows/${workflowId}`
+                : `http://localhost:3501/api/workflows/${workflowId}`;
 
             const response = await fetch(endpoint);
             if (response.ok) {
@@ -100,8 +100,8 @@ export const useWorkflow = ({
                     setWorkflowId(null); // New copy, not linked to public workflow
                 }
 
-                setCanvasTitle(workflow.title || 'Untitled');
-                setEditingTitleValue(workflow.title || 'Untitled');
+                setCanvasTitle(workflow.title || '未命名');
+                setEditingTitleValue(workflow.title || '未命名');
                 setNodes(workflow.nodes || []);
                 setGroups(workflow.groups || []); // Restore groups
                 // Reset selection
@@ -111,7 +111,7 @@ export const useWorkflow = ({
                 // Return info for tracking
                 return {
                     nodeCount: (workflow.nodes || []).length,
-                    title: workflow.title || 'Untitled'
+                    title: workflow.title || '未命名'
                 };
             }
         } catch (error) {

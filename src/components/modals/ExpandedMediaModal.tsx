@@ -186,14 +186,14 @@ export const ExpandedMediaModal: React.FC<ExpandedMediaModalProps> = ({
                         className="ml-2 px-2 py-0.5 text-xs text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded transition-colors"
                         onClick={handleResetZoom}
                     >
-                        Reset
+                        重置
                     </button>
                 )}
             </div>
 
             {/* Zoom Hint */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 text-white/50 text-sm pointer-events-none">
-                Scroll to zoom • Drag to pan when zoomed
+                滚动以缩放 • 放大后可拖动平移
             </div>
 
             {/* Media Content */}
@@ -221,7 +221,7 @@ export const ExpandedMediaModal: React.FC<ExpandedMediaModalProps> = ({
                 ) : (
                     <img
                         src={mediaUrl}
-                        alt="Fullscreen preview"
+                        alt="全屏预览"
                         className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
                         draggable={false}
                     />

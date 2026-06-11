@@ -29,8 +29,6 @@ interface NodeContentProps {
     onImageToImage?: (nodeId: string) => void;
     onImageToVideo?: (nodeId: string) => void;
     onUpdate?: (nodeId: string, updates: Partial<NodeData>) => void;
-    // Social sharing
-    onPostToX?: (nodeId: string, mediaUrl: string, mediaType: 'image' | 'video') => void;
 }
 
 export const NodeContent: React.FC<NodeContentProps> = ({
@@ -50,8 +48,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onTextToImage,
     onImageToImage,
     onImageToVideo,
-    onUpdate,
-    onPostToX
+    onUpdate
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -130,14 +127,14 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                     {isVideoType ? (
                         <video src={data.resultUrl} controls loop className="w-full h-full object-cover" />
                     ) : (
-                        <img src={data.resultUrl} alt="Generated" className="w-full h-full object-cover pointer-events-none" />
+                        <img src={data.resultUrl} alt="已生成" className="w-full h-full object-cover pointer-events-none" />
                     )}
 
                     {/* Regenerating Overlay - Shows when loading with existing content */}
                     {isLoading && (
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
                             <Loader2 size={40} className="animate-spin text-blue-400" />
-                            <span className="mt-3 text-sm text-white font-medium">Regenerating...</span>
+                            <span className="mt-3 text-sm text-white font-medium">重新生成中…</span>
                         </div>
                     )}
                 </div>
@@ -161,7 +158,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                         onUpdate?.(data.id, { prompt: localPrompt });
                                     }
                                 }}
-                                placeholder="Write your text content here..."
+                                placeholder="在此输入文本内容…"
                                 className="w-full bg-transparent text-white text-sm resize-none outline-none placeholder:text-neutral-600"
                                 style={{ minHeight: data.isPromptExpanded ? '300px' : '150px' }}
                                 autoFocus
@@ -172,10 +169,10 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                     onClick={() => onUpdate?.(data.id, { isPromptExpanded: !data.isPromptExpanded })}
                                     onPointerDown={(e) => e.stopPropagation()}
                                     className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-neutral-500 hover:text-white hover:bg-neutral-700 rounded transition-colors"
-                                    title={data.isPromptExpanded ? 'Shrink text area' : 'Expand text area'}
+                                    title={data.isPromptExpanded ? '收起文本框' : '展开文本框'}
                                 >
                                     {data.isPromptExpanded ? <Shrink size={12} /> : <Expand size={12} />}
-                                    <span>{data.isPromptExpanded ? 'Shrink' : 'Expand'}</span>
+                                    <span>{data.isPromptExpanded ? '收起' : '展开'}</span>
                                 </button>
                             </div>
                         </div>
@@ -184,24 +181,24 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                         <div className="p-5 flex flex-col gap-4">
                             {/* Header */}
                             <div className="text-neutral-500 text-sm font-medium">
-                                Try to:
+                                你想要：
                             </div>
 
                             {/* Menu Options */}
                             <div className="flex flex-col gap-1">
                                 <TextNodeMenuItem
                                     icon={<Pencil size={16} />}
-                                    label="Write your own content"
+                                    label="自己撰写内容"
                                     onClick={() => onWriteContent?.(data.id)}
                                 />
                                 <TextNodeMenuItem
                                     icon={<Video size={16} />}
-                                    label="Text to Video"
+                                    label="文本生成视频"
                                     onClick={() => onTextToVideo?.(data.id)}
                                 />
                                 <TextNodeMenuItem
                                     icon={<ImageIcon size={16} />}
-                                    label="Text to Image"
+                                    label="文本生成图像"
                                     onClick={() => onTextToImage?.(data.id)}
                                 />
                             </div>
@@ -217,11 +214,11 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                     {/* Input Image Preview for Video Nodes */}
                     {isVideoType && inputUrl && (
                         <div className="absolute inset-0 z-0">
-                            <img src={inputUrl} alt="Input Frame" className="w-full h-full object-cover opacity-30 blur-sm" />
+                            <img src={inputUrl} alt="输入帧" className="w-full h-full object-cover opacity-30 blur-sm" />
                             <div className="absolute inset-0 bg-black/40" />
                             <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-white font-medium flex items-center gap-1">
                                 <ImageIcon size={10} />
-                                Input Frame
+                                输入帧
                             </div>
                         </div>
                     )}
@@ -229,7 +226,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                     {isLoading ? (
                         <div className="relative z-10 flex flex-col items-center gap-2">
                             <Loader2 size={32} className="animate-spin text-blue-400" />
-                            <span className="text-xs text-neutral-500 font-medium">Generating...</span>
+                            <span className="text-xs text-neutral-500 font-medium">生成中…</span>
                         </div>
                     ) : (
                         <div className="relative z-10 flex flex-col items-center gap-3">
@@ -249,7 +246,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                         className="flex items-center gap-2 px-4 py-2 bg-neutral-800/80 hover:bg-neutral-700 rounded-lg text-white text-sm font-medium transition-colors"
                                     >
                                         <Upload size={16} />
-                                        Upload
+                                        上传
                                     </button>
                                 </>
                             )}
@@ -265,24 +262,24 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                 <>
                                     <div className="text-neutral-500 text-sm font-medium">
                                         {isVideoType && inputUrl
-                                            ? "Ready to animate"
+                                            ? "可以开始制作动画"
                                             : isVideoType
-                                                ? "Waiting for input..."
+                                                ? "等待输入…"
                                                 : isLocalModel
-                                                    ? "Select a model and enter prompt"
-                                                    : "Try to:"
+                                                    ? "选择模型并输入提示词"
+                                                    : "你想要："
                                         }
                                     </div>
                                     {!isVideoType && !isLocalModel && (
                                         <div className="flex flex-col gap-1 w-full px-2">
                                             <TextNodeMenuItem
                                                 icon={<ImageIcon size={16} />}
-                                                label="Image to Image"
+                                                label="图像生成图像"
                                                 onClick={() => onImageToImage?.(data.id)}
                                             />
                                             <TextNodeMenuItem
                                                 icon={<Film size={16} />}
-                                                label="Image to Video"
+                                                label="图像生成视频"
                                                 onClick={() => onImageToVideo?.(data.id)}
                                             />
                                         </div>

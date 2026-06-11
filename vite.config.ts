@@ -8,11 +8,11 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
-          target: 'http://localhost:3001',
+          target: 'http://localhost:3501',
           changeOrigin: true
         },
         '/library': {
-          target: 'http://localhost:3001',
+          target: 'http://localhost:3501',
           changeOrigin: true
         }
       }

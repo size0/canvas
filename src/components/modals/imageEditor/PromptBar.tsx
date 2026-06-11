@@ -104,7 +104,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     onClick={() => setShowModelDropdown(!showModelDropdown)}
                     className="flex items-center gap-1 text-[11px] text-neutral-300 hover:bg-neutral-700 px-2 py-1.5 rounded-md transition-colors border border-neutral-600"
                 >
-                    {currentModel.provider === 'google' ? (
+                    {currentModel.provider === 'google' || currentModel.provider === 'gpt2api' ? (
                         <Banana size={11} className="text-yellow-400" />
                     ) : currentModel.provider === 'openai' ? (
                         <OpenAIIcon size={11} className="text-green-400" />
@@ -120,11 +120,32 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 {showModelDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider bg-[#1a1a1a] border-b border-neutral-700">
-                            {hasInputImage ? 'Image → Image' : 'Text → Image'}
+                            {hasInputImage ? '图像 → 图像' : '文本 → 图像'}
                         </div>
+                        {availableModels.filter(m => m.provider === 'gpt2api').length > 0 && (
+                            <>
+                                <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">gpt2api</div>
+                                {availableModels.filter(m => m.provider === 'gpt2api').map(model => (
+                                    <button
+                                        key={model.id}
+                                        onClick={() => onModelChange(model.id)}
+                                        className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentModel.id === model.id ? 'text-blue-400' : 'text-neutral-300'}`}
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <Banana size={12} className="text-yellow-400" />
+                                            {model.name}
+                                            {model.recommended && (
+                                                <span className="text-[9px] px-1 py-0.5 bg-green-600/30 text-green-400 rounded">REC</span>
+                                            )}
+                                        </span>
+                                        {currentModel.id === model.id && <Check size={12} />}
+                                    </button>
+                                ))}
+                            </>
+                        )}
                         {availableModels.filter(m => m.provider === 'openai').length > 0 && (
                             <>
-                                <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">OpenAI</div>
+                                <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f] border-t border-neutral-700">OpenAI</div>
                                 {availableModels.filter(m => m.provider === 'openai').map(model => (
                                     <button
                                         key={model.id}
@@ -191,7 +212,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe the changes you want to make..."
+                placeholder="描述你想要进行的修改..."
                 className="flex-1 min-w-0 bg-transparent text-sm text-neutral-200 placeholder-neutral-500 outline-none"
             />
 
@@ -209,7 +230,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
                     {showAspectDropdown && (
                         <div className="absolute bottom-full mb-2 right-0 w-28 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto">
-                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Size</div>
+                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">尺寸</div>
                             {(currentModel.aspectRatios || []).map(ratio => (
                                 <button
                                     key={ratio}
@@ -236,7 +257,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
                     {showResolutionDropdown && (
                         <div className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
-                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Quality</div>
+                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">画质</div>
                             {(currentModel.resolutions || ['1K']).map(res => (
                                 <button
                                     key={res}
@@ -274,7 +295,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                         <path d="M12 2v20M2 12h20" />
                     </svg>
-                    Generate
+                    生成
                 </button>
             </div>
         </div>

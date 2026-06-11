@@ -12,20 +12,19 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import chatAgent from './agent/index.js';
 import generationRoutes from './routes/generation.js';
-import twitterRoutes from './routes/twitter.js';
-import tiktokPostRoutes from './routes/tiktok-post.js';
-import { processTikTokVideo, isValidTikTokUrl } from './tools/tiktok.js';
 import localModelsRoutes from './routes/local-models.js';
 import storyboardRoutes from './routes/storyboard.js';
+import videoStudioRoutes from './routes/video-studio.js';
+import { getKey, getAllSettings, saveConfig, SETTINGS_KEYS } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3501;
 
 // Ensure library directories exist
-const LIBRARY_DIR = path.join(__dirname, '..', 'library');
+const LIBRARY_DIR = process.env.LIBRARY_DIR || path.join(__dirname, '..', 'library');
 const WORKFLOWS_DIR = path.join(LIBRARY_DIR, 'workflows');
 const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
@@ -50,68 +49,78 @@ app.use('/library', (req, res, next) => {
 }, express.static(LIBRARY_DIR));
 
 
-const API_KEY = process.env.GEMINI_API_KEY;
-
-if (!API_KEY) {
-    console.warn("SERVER WARNING: GEMINI_API_KEY is not set in environment or .env file.");
-}
-
 const getClient = () => {
-    return new GoogleGenAI({ apiKey: API_KEY || '' });
+    return new GoogleGenAI({ apiKey: getKey('GEMINI_API_KEY') });
 };
 
 // ============================================================================
 // KLING AI CONFIGURATION
 // ============================================================================
 
-const KLING_ACCESS_KEY = process.env.KLING_ACCESS_KEY;
-const KLING_SECRET_KEY = process.env.KLING_SECRET_KEY;
 const KLING_BASE_URL = 'https://api-singapore.klingai.com';
 
-if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY) {
-    console.warn("SERVER WARNING: KLING_ACCESS_KEY or KLING_SECRET_KEY not set. Kling AI models will not work.");
+// ============================================================================
+// API KEY CONFIGURATION
+// ----------------------------------------------------------------------------
+// Keys are resolved dynamically (config file > environment) so the in-app
+// Settings page can update them without restarting the server.
+// ============================================================================
+
+// Expose every settings key to route modules via app.locals as live getters,
+// so `req.app.locals.GEMINI_API_KEY` always reflects the latest saved value.
+for (const key of SETTINGS_KEYS) {
+    Object.defineProperty(app.locals, key, {
+        get() { return getKey(key); },
+        enumerable: true,
+        configurable: true,
+    });
 }
 
-// ============================================================================
-// HAILUO AI CONFIGURATION
-// ============================================================================
-
-const HAILUO_API_KEY = process.env.HAILUO_API_KEY;
-
-if (!HAILUO_API_KEY) {
-    console.warn("SERVER WARNING: HAILUO_API_KEY not set. Hailuo AI models will not work.");
-}
-
-// ============================================================================
-// OPENAI GPT IMAGE CONFIGURATION
-// ============================================================================
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-if (!OPENAI_API_KEY) {
-    console.warn("SERVER WARNING: OPENAI_API_KEY not set. OpenAI GPT Image models will not work.");
-}
-
-// ============================================================================
-// FAL.AI CONFIGURATION (for Kling 2.6 Motion Control)
-// ============================================================================
-
-const FAL_API_KEY = process.env.FAL_API_KEY;
-
-if (!FAL_API_KEY) {
-    console.warn("SERVER WARNING: FAL_API_KEY not set. Kling 2.6 Motion Control will not work.");
-}
-
-// Set up app.locals for sharing config with route modules
-app.locals.GEMINI_API_KEY = API_KEY;
-app.locals.KLING_ACCESS_KEY = KLING_ACCESS_KEY;
-app.locals.KLING_SECRET_KEY = KLING_SECRET_KEY;
-app.locals.HAILUO_API_KEY = HAILUO_API_KEY;
-app.locals.OPENAI_API_KEY = OPENAI_API_KEY;
-app.locals.FAL_API_KEY = FAL_API_KEY;
 app.locals.IMAGES_DIR = IMAGES_DIR;
 app.locals.VIDEOS_DIR = VIDEOS_DIR;
 app.locals.LIBRARY_DIR = LIBRARY_DIR;
+
+// Mirror resolved settings into process.env so route/service modules that read
+// process.env directly (Twitter, TikTok, etc.) also pick up saved values live.
+const applyConfigToEnv = () => {
+    for (const key of SETTINGS_KEYS) {
+        const value = getKey(key);
+        if (value) process.env[key] = value;
+    }
+};
+applyConfigToEnv();
+
+// Startup diagnostics (non-fatal warnings)
+(() => {
+    if (!getKey('TEXT_API_KEY')) console.warn("SERVER WARNING: 文字模型 KEY 未配置（聊天不可用）。请在「设置」中填写。");
+    if (!getKey('IMAGE_API_KEY')) console.warn("SERVER WARNING: 图片模型 KEY 未配置（图像生成不可用）。请在「设置」中填写。");
+    if (!getKey('VIDEO_API_KEY')) console.warn("SERVER WARNING: 视频模型 KEY 未配置（视频生成不可用）。请在「设置」中填写。");
+})();
+
+// ============================================================================
+// SETTINGS API (read/write API keys from the in-app Settings page)
+// ============================================================================
+
+// Return current values for all settings keys (localhost desktop app).
+app.get('/api/settings', (req, res) => {
+    try {
+        res.json({ success: true, settings: getAllSettings(), keys: SETTINGS_KEYS });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Persist updated settings. Takes effect immediately (no restart needed).
+app.post('/api/settings', (req, res) => {
+    try {
+        const updates = (req.body && req.body.settings) ? req.body.settings : req.body;
+        const merged = saveConfig(updates || {});
+        applyConfigToEnv();
+        res.json({ success: true, settings: merged });
+    } catch (error) {
+        res.status(500).json({ error: error.message || 'Failed to save settings' });
+    }
+});
 
 // ============================================================================
 // WORKFLOW SANITIZATION HELPERS
@@ -223,11 +232,8 @@ function sanitizeWorkflowNodes(nodes) {
 // Mount generation routes (image and video generation)
 app.use('/api', generationRoutes);
 
-// Mount Twitter routes (Post to X feature)
-app.use('/api/twitter', twitterRoutes);
-
-// Mount TikTok routes (Post to TikTok feature)
-app.use('/api/tiktok-post', tiktokPostRoutes);
+// Mount Video Studio routes (clip editing, TTS, subtitles, export)
+app.use('/api/video-studio', videoStudioRoutes);
 
 // Mount Local Models routes (local open-source model discovery)
 app.use('/api/local-models', localModelsRoutes);
@@ -808,7 +814,10 @@ app.post('/api/assets/:type', async (req, res) => {
         }
 
         const targetDir = type === 'images' ? IMAGES_DIR : VIDEOS_DIR;
-        const id = Date.now().toString();
+        // 防止连续快速上传时时间戳撞号覆盖文件
+        let idNum = Date.now();
+        while (fs.existsSync(path.join(targetDir, `${idNum}.json`))) idNum++;
+        const id = idNum.toString();
         const ext = type === 'images' ? 'png' : 'mp4';
         const filename = `${id}.${ext}`;
         const metaFilename = `${id}.json`;
@@ -931,58 +940,6 @@ app.delete('/api/assets/:type/:id', async (req, res) => {
     } catch (error) {
         console.error('Delete asset error:', error);
         res.status(500).json({ error: error.message });
-    }
-});
-
-// ============================================================================
-// TIKTOK IMPORT API
-// ============================================================================
-
-/**
- * Import a TikTok video without watermark
- * Downloads the video, optionally trims first/last frames, saves to library
- */
-app.post('/api/tiktok/import', async (req, res) => {
-    try {
-        const { url, enableTrim = true } = req.body;
-
-        if (!url) {
-            return res.status(400).json({ error: 'TikTok URL is required' });
-        }
-
-        if (!isValidTikTokUrl(url)) {
-            return res.status(400).json({ error: 'Invalid TikTok URL format. Please provide a valid TikTok video URL.' });
-        }
-
-        console.log(`[TikTok API] Processing import request for: ${url}`);
-
-        const result = await processTikTokVideo(url, VIDEOS_DIR, enableTrim);
-
-        res.json(result);
-    } catch (error) {
-        console.error('[TikTok API] Import error:', error);
-        res.status(500).json({
-            error: error.message || 'Failed to import TikTok video',
-            details: error.toString()
-        });
-    }
-});
-
-/**
- * Validate a TikTok URL without downloading
- */
-app.post('/api/tiktok/validate', async (req, res) => {
-    try {
-        const { url } = req.body;
-
-        if (!url) {
-            return res.status(400).json({ valid: false, error: 'URL is required' });
-        }
-
-        const valid = isValidTikTokUrl(url);
-        res.json({ valid, url });
-    } catch (error) {
-        res.status(500).json({ valid: false, error: error.message });
     }
 });
 
@@ -1150,8 +1107,9 @@ app.post('/api/chat', async (req, res) => {
     try {
         const { sessionId, message, media } = req.body;
 
+        const API_KEY = getKey('TEXT_API_KEY');
         if (!API_KEY) {
-            return res.status(500).json({ error: "Server missing API Key config" });
+            return res.status(500).json({ error: "未配置文字模型 KEY，请在「设置」中填写后再使用聊天" });
         }
 
         if (!sessionId) {
@@ -1217,8 +1175,11 @@ if (process.env.NODE_ENV === 'production') {
     const distPath = path.join(__dirname, '..', 'dist');
     app.use(express.static(distPath));
 
-    // Handle SPA routing: serve index.html for any unknown routes
-    app.get('*', (req, res) => {
+    // Handle SPA routing: serve index.html for any non-API GET request.
+    // (Express 5 / path-to-regexp v8 no longer accepts the bare '*' path.)
+    app.use((req, res, next) => {
+        if (req.method !== 'GET') return next();
+        if (req.path.startsWith('/api') || req.path.startsWith('/library')) return next();
         res.sendFile(path.join(distPath, 'index.html'));
     });
 }

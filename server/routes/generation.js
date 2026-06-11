@@ -13,6 +13,7 @@ import { generateGeminiImage, generateVeoVideo } from '../services/gemini.js';
 import { generateHailuoVideo } from '../services/hailuo.js';
 import { generateOpenAIImage } from '../services/openai.js';
 import { resolveImageToBase64, saveBufferToFile } from '../utils/imageHelpers.js';
+import { generateGpt2apiImage, generateGpt2apiVideo, isGpt2apiImageModel, isGpt2apiVideoModel } from '../services/gpt2api.js';
 
 const router = express.Router();
 
@@ -23,16 +24,42 @@ const router = express.Router();
 router.post('/generate-image', async (req, res) => {
     try {
         const { nodeId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, IMAGES_DIR } = req.app.locals;
+        const { IMAGE_API_URL, IMAGE_API_KEY, IMAGE_MODEL, IMAGES_DIR } = req.app.locals;
 
-        // Determine provider
-        const isKlingModel = imageModel && imageModel.startsWith('kling-');
-        const isOpenAIModel = imageModel && imageModel.startsWith('gpt-image-');
+        // 始终使用「设置」里的图片模型配置（OpenAI 兼容下游）
+        const isGpt2api = true;
+        const isKlingModel = false;
+        const isOpenAIModel = false;
 
         let imageBuffer;
         let imageFormat = 'png';
 
-        if (isKlingModel) {
+        if (isGpt2api) {
+            // --- 统一图片生成（设置：网址 / KEY / 模型名）---
+            if (!IMAGE_API_KEY) {
+                return res.status(500).json({ error: "未配置图片模型 KEY，请在「设置」中填写" });
+            }
+
+            let imageBase64Array = null;
+            if (rawImageBase64) {
+                const rawImages = Array.isArray(rawImageBase64) ? rawImageBase64 : [rawImageBase64];
+                imageBase64Array = rawImages.map(img => resolveImageToBase64(img)).filter(Boolean);
+            }
+
+            console.log(`Using image model: ${IMAGE_MODEL} @ ${IMAGE_API_URL}`);
+            const result = await generateGpt2apiImage({
+                prompt,
+                imageBase64Array,
+                aspectRatio,
+                resolution,
+                model: IMAGE_MODEL,
+                baseUrl: IMAGE_API_URL,
+                apiKey: IMAGE_API_KEY,
+            });
+            imageBuffer = result.buffer;
+            imageFormat = result.format;
+
+        } else if (isKlingModel) {
             // --- KLING AI IMAGE GENERATION ---
             if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY) {
                 return res.status(500).json({
@@ -187,20 +214,39 @@ router.post('/generate-image', async (req, res) => {
 router.post('/generate-video', async (req, res) => {
     try {
         const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, VIDEOS_DIR } = req.app.locals;
+        const { VIDEO_API_URL, VIDEO_API_KEY, VIDEO_MODEL, VIDEOS_DIR } = req.app.locals;
 
         // Resolve file URLs to base64
         const imageBase64 = resolveImageToBase64(rawImageBase64);
         const lastFrameBase64 = resolveImageToBase64(rawLastFrameBase64);
         const motionReferenceUrl = resolveImageToBase64(rawMotionReferenceUrl);
 
-        // Determine provider
-        const isKlingModel = videoModel && videoModel.startsWith('kling-');
-        const isHailuoModel = videoModel && videoModel.startsWith('hailuo-');
+        // 始终使用「设置」里的视频模型配置（OpenAI 兼容下游）
+        const isGpt2api = true;
+        const isKlingModel = false;
+        const isHailuoModel = false;
 
         let videoBuffer;
 
-        if (isKlingModel) {
+        if (isGpt2api) {
+            // --- 统一视频生成（设置：网址 / KEY / 模型名）---
+            if (!VIDEO_API_KEY) {
+                return res.status(500).json({ error: "未配置视频模型 KEY，请在「设置」中填写" });
+            }
+            console.log(`Using video model: ${VIDEO_MODEL} @ ${VIDEO_API_URL}, duration: ${duration || 6}s`);
+            videoBuffer = await generateGpt2apiVideo({
+                prompt,
+                imageBase64,
+                lastFrameBase64,
+                aspectRatio,
+                resolution,
+                duration: duration || 6,
+                model: VIDEO_MODEL,
+                baseUrl: VIDEO_API_URL,
+                apiKey: VIDEO_API_KEY,
+            });
+
+        } else if (isKlingModel) {
             // --- KLING AI VIDEO GENERATION ---
 
             // Check if this is a Kling 2.6 model (route to Fal.ai - official API doesn't support v2.6)

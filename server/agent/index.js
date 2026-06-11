@@ -13,8 +13,46 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createChatGraph, generateTopicTitle } from "./graph/chatGraph.js";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { getKey } from "../config.js";
+import { gpt2apiChat } from "../services/gpt2api.js";
+import { CHAT_AGENT_SYSTEM_PROMPT, TOPIC_GENERATION_PROMPT } from "./prompts/system.js";
+
+// 读取 gpt2api 文本配置
+function getTextConfig() {
+    return {
+        apiKey: getKey('TEXT_API_KEY'),
+        baseUrl: getKey('TEXT_API_URL'),
+        model: getKey('TEXT_MODEL') || 'grok-4.20-fast',
+    };
+}
+
+/** 将会话内的 LangChain 消息转换为 OpenAI 兼容消息 */
+function toOpenAIMessages(messages) {
+    const out = [{ role: 'system', content: CHAT_AGENT_SYSTEM_PROMPT }];
+    for (const m of messages) {
+        const role = m._getType?.() === 'human' ? 'user' : 'assistant';
+        out.push({ role, content: m.content });
+    }
+    return out;
+}
+
+/** 基于会话生成简短主题标题（使用 gpt2api 文本模型） */
+export async function generateTopicTitle(messages) {
+    const { apiKey, baseUrl, model } = getTextConfig();
+    if (!apiKey) return 'New Chat';
+
+    // 仅取首条用户文本作为生成依据，避免发送图片
+    const firstUser = messages.find(m => m._getType?.() === 'human');
+    const userText = firstUser ? (typeof firstUser.content === 'string' ? firstUser.content : '用户分享了图片/视频') : '';
+
+    const oaMessages = [
+        { role: 'system', content: TOPIC_GENERATION_PROMPT },
+        { role: 'user', content: userText || 'New conversation' },
+    ];
+    const title = await gpt2apiChat({ messages: oaMessages, model, baseUrl, apiKey, temperature: 0.3, maxTokens: 32 });
+    return (title || 'New Chat').trim().replace(/^["']|["']$/g, '').slice(0, 40) || 'New Chat';
+}
 
 // ============================================================================
 // FILE PATHS
@@ -297,7 +335,7 @@ export function getSessionData(sessionId) {
  */
 export async function sendMessage(sessionId, content, media, apiKey) {
     const session = getSession(sessionId);
-    const graph = createChatGraph();
+    const { apiKey: gptKey, baseUrl, model } = getTextConfig();
 
     // Debug: Log session state
     console.log(`[Chat] Session ${sessionId} has ${session.messages.length} existing messages`);
@@ -356,16 +394,12 @@ export async function sendMessage(sessionId, content, media, apiKey) {
 
     session.messages.push(userMessage);
 
-    console.log(`[Chat] Sending ${session.messages.length} messages to LLM`);
+    console.log(`[Chat] Sending ${session.messages.length} messages to gpt2api (${model})`);
 
-    // Invoke the graph
-    const result = await graph.invoke(
-        { messages: session.messages },
-        { configurable: { apiKey } }
-    );
-
-    // Extract AI response from result
-    const aiResponse = result.messages[result.messages.length - 1];
+    // Call gpt2api (OpenAI-compatible chat completions)
+    const oaMessages = toOpenAIMessages(session.messages);
+    const responseText = await gpt2apiChat({ messages: oaMessages, model, baseUrl, apiKey: gptKey });
+    const aiResponse = new AIMessage(responseText || '');
     session.messages.push(aiResponse);
 
     // Convert the multimodal user message to text for future context
@@ -389,7 +423,7 @@ export async function sendMessage(sessionId, content, media, apiKey) {
     let topic = session.topic;
     if (session.messages.length === 2 && !session.topic) {
         try {
-            topic = await generateTopicTitle(session.messages, apiKey);
+            topic = await generateTopicTitle(session.messages);
             session.topic = topic;
         } catch (err) {
             console.error("Failed to generate topic:", err);
@@ -411,14 +445,11 @@ export async function sendMessage(sessionId, content, media, apiKey) {
 // EXPORTS
 // ============================================================================
 
-export { createChatGraph, generateTopicTitle };
-
 export default {
     getSession,
     deleteSession,
     listSessions,
     getSessionData,
     sendMessage,
-    createChatGraph,
     generateTopicTitle,
 };

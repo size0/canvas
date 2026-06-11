@@ -46,6 +46,8 @@ export const useNodeManagement = () => {
             prompt: '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
+            imageModel: 'nano-banana-pro',
+            videoModel: 'grok-imagine-video',
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: parentId ? [parentId] : []

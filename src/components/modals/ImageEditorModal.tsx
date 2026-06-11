@@ -447,7 +447,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
     // --- Render ---
     return (
-        <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
+        <div className="fixed inset-x-0 bottom-0 z-[9999] bg-black flex flex-col" style={{ top: 'var(--titlebar-h, 0px)' }}>
             {/* Top Bar */}
             <div className="h-14 flex items-center justify-between px-4">
                 <div className="flex items-center gap-3">
@@ -458,14 +458,14 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                             <polyline points="21 15 16 10 5 21" />
                         </svg>
                     </div>
-                    <span className="text-sm text-neutral-300">Image Editor</span>
+                    <span className="text-sm text-neutral-300">图像编辑器</span>
                 </div>
 
                 <div className="flex items-center gap-2">
                     {/* Download Button */}
                     <button
                         className="w-10 h-10 rounded hover:bg-neutral-800 flex items-center justify-center text-neutral-400"
-                        title="Download"
+                        title="下载"
                     >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -477,7 +477,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     <button
                         onClick={onClose}
                         className="w-10 h-10 rounded hover:bg-neutral-800 flex items-center justify-center text-neutral-400"
-                        title="Exit Image Editor"
+                        title="退出图像编辑器"
                     >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M18 6L6 18M6 6l12 12" />
@@ -518,7 +518,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                             <img
                                 ref={imageRef}
                                 src={localImageUrl}
-                                alt="Editing"
+                                alt="编辑中"
                                 className="max-w-full max-h-full object-contain"
                                 style={{ maxHeight: 'calc(100vh - 350px)' }}
                                 onLoad={(e) => {
@@ -796,13 +796,13 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                                             onClick={(e) => { e.stopPropagation(); crop.cancelCrop(); }}
                                             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg text-sm font-medium transition-colors"
                                         >
-                                            Cancel
+                                            取消
                                         </button>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); crop.applyCrop(); }}
                                             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
                                         >
-                                            Apply
+                                            应用
                                         </button>
                                     </div>
                                 </div>
@@ -810,7 +810,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                         </div>
                     ) : (
                         <div className="w-[600px] h-[400px] bg-neutral-100 rounded flex items-center justify-center">
-                            <span className="text-neutral-400">No image loaded</span>
+                            <span className="text-neutral-400">未加载图像</span>
                         </div>
                     )}
                 </div>
