@@ -291,18 +291,18 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 未找到工作流
                             </div>
                         ) : (
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-5 gap-3">
                                 {workflows.map(workflow => (
                                     <div
                                         key={workflow.id}
                                         onClick={() => onLoadWorkflow(workflow.id)}
-                                        className={`rounded-xl overflow-hidden cursor-pointer transition-all group ${workflow.id === currentWorkflowId
+                                        className={`rounded-lg overflow-hidden cursor-pointer transition-all group ${workflow.id === currentWorkflowId
                                             ? 'ring-2 ring-blue-500'
                                             : ''
                                             }`}
                                     >
                                         {/* Thumbnail */}
-                                        <div className="aspect-[4/3] bg-gradient-to-br from-neutral-800 to-neutral-900 flex items-center justify-center relative overflow-hidden">
+                                        <div className="aspect-video bg-gradient-to-br from-neutral-800 to-neutral-900 flex items-center justify-center relative overflow-hidden">
                                             {workflow.coverUrl ? (
                                                 <img
                                                     src={workflow.coverUrl}
@@ -311,20 +311,20 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                                     loading="lazy"
                                                 />
                                             ) : (
-                                                <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center">
-                                                    <FileText size={28} className="text-neutral-500" />
+                                                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center">
+                                                    <FileText size={18} className="text-neutral-500" />
                                                 </div>
                                             )}
 
                                             {/* Action buttons */}
-                                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                            <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                                                 {/* Edit cover button */}
                                                 <button
                                                     onClick={(e) => openCoverEditor(workflow.id, e)}
-                                                    className="p-1.5 bg-black/50 hover:bg-blue-500 rounded-lg transition-all"
+                                                    className="p-1 bg-black/50 hover:bg-blue-500 rounded-md transition-all"
                                                     title="编辑封面"
                                                 >
-                                                    <Pencil size={14} className="text-white" />
+                                                    <Pencil size={12} className="text-white" />
                                                 </button>
                                                 {/* Delete button */}
                                                 <button
@@ -332,17 +332,17 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                                         e.stopPropagation();
                                                         setDeleteConfirm(workflow.id);
                                                     }}
-                                                    className="p-1.5 bg-black/50 hover:bg-red-500 rounded-lg transition-all"
+                                                    className="p-1 bg-black/50 hover:bg-red-500 rounded-md transition-all"
                                                     title="删除工作流"
                                                 >
-                                                    <Trash2 size={14} className="text-white" />
+                                                    <Trash2 size={12} className="text-white" />
                                                 </button>
                                             </div>
                                         </div>
                                         {/* Info */}
-                                        <div className={`p-3 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
-                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
-                                            <p className={`text-xs mt-0.5 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
+                                        <div className={`px-2 py-1.5 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
+                                            <h3 className={`font-medium text-xs truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
+                                            <p className={`text-[10px] mt-0.5 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
                                                 {workflow.nodeCount} 个节点
                                             </p>
                                         </div>
@@ -359,15 +359,15 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                 <p className="text-xs text-neutral-600">将工作流 JSON 添加到 public/workflows/</p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-5 gap-3">
                                 {publicWorkflows.map(workflow => (
                                     <div
                                         key={workflow.id}
                                         onClick={() => onLoadWorkflow(`public:${workflow.id}`)}
-                                        className="rounded-xl overflow-hidden cursor-pointer transition-all group"
+                                        className="rounded-lg overflow-hidden cursor-pointer transition-all group"
                                     >
                                         {/* Thumbnail */}
-                                        <div className="aspect-[4/3] bg-gradient-to-br from-green-800/30 to-emerald-900/30 flex items-center justify-center relative overflow-hidden">
+                                        <div className="aspect-video bg-gradient-to-br from-green-800/30 to-emerald-900/30 flex items-center justify-center relative overflow-hidden">
                                             {workflow.coverUrl ? (
                                                 <img
                                                     src={workflow.coverUrl}
@@ -376,19 +376,19 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
                                                     loading="lazy"
                                                 />
                                             ) : (
-                                                <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-600/20 flex items-center justify-center">
-                                                    <FileText size={28} className="text-neutral-500" />
+                                                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-600/20 flex items-center justify-center">
+                                                    <FileText size={18} className="text-neutral-500" />
                                                 </div>
                                             )}
                                             {/* Public badge */}
-                                            <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-600/80 rounded text-[10px] font-medium text-white">
+                                            <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-green-600/80 rounded text-[10px] font-medium text-white">
                                                 公共
                                             </div>
                                         </div>
                                         {/* Info */}
-                                        <div className={`p-3 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
-                                            <h3 className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
-                                            <p className={`text-xs mt-0.5 ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
+                                        <div className={`px-2 py-1.5 ${isDark ? 'bg-neutral-900/50' : 'bg-neutral-100/90'}`}>
+                                            <h3 className={`font-medium text-xs truncate ${isDark ? 'text-white' : 'text-neutral-900'}`}>{workflow.title || '未命名'}</h3>
+                                            <p className={`text-[10px] mt-0.5 truncate ${isDark ? 'text-neutral-500' : 'text-neutral-600'}`}>
                                                 {workflow.description || `${workflow.nodeCount} 个节点`}
                                             </p>
                                         </div>

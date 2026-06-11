@@ -283,13 +283,19 @@ app.post('/api/library', async (req, res) => {
             const buffer = Buffer.from(base64Data, 'base64');
 
             // Determine extension from mime
-            let ext = '.png';
-            if (mimeType === 'image/jpeg') ext = '.jpg';
-            else if (mimeType === 'video/mp4') ext = '.mp4';
-            // Add more as needed
+            const mimeExt = {
+                'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+                'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+            };
+            const ext = mimeExt[mimeType] || (mimeType.startsWith('video/') ? '.mp4' : '.png');
 
             destFilename = `${safeName}${ext}`;
             destPath = path.join(destDir, destFilename);
+            // 避免清洗后的同名文件互相覆盖（如中文文件名都变成下划线）
+            while (fs.existsSync(destPath)) {
+                destFilename = `${safeName}_${Date.now()}${ext}`;
+                destPath = path.join(destDir, destFilename);
+            }
 
             fs.writeFileSync(destPath, buffer);
         }

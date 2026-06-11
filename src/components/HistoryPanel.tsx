@@ -283,13 +283,13 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                         <div className="space-y-6">
                             {sortedDates.map(date => (
                                 <div key={date}>
-                                    <h3 className={`text-sm mb-3 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>{date}</h3>
-                                    <div className="grid grid-cols-3 gap-3">
+                                    <h3 className={`text-xs mb-2 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>{date}</h3>
+                                    <div className="grid grid-cols-6 gap-2">
                                         {groupedAssets[date].map(asset => (
                                             <div
                                                 key={asset.id}
                                                 onClick={() => handleSelectAsset(asset)}
-                                                className={`aspect-square rounded-xl overflow-hidden cursor-pointer transition-all group relative ${isDark ? 'bg-neutral-900' : 'bg-neutral-100'}`}
+                                                className={`aspect-square rounded-lg overflow-hidden cursor-pointer transition-all group relative ${isDark ? 'bg-neutral-900' : 'bg-neutral-100'}`}
                                             >
                                                 {activeTab === 'images' ? (
                                                     <img
@@ -317,9 +317,9 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
                                                         e.stopPropagation();
                                                         setDeleteConfirm(asset.id);
                                                     }}
-                                                    className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                                    className="absolute top-1 right-1 p-1 bg-black/50 hover:bg-red-500 rounded-md opacity-0 group-hover:opacity-100 transition-all"
                                                 >
-                                                    <Trash2 size={14} className="text-white" />
+                                                    <Trash2 size={12} className="text-white" />
                                                 </button>
                                             </div>
                                         ))}

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { X, Search, Filter, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Trash2, Upload, Loader2 } from 'lucide-react';
+import { showAppAlert } from './ui/AppDialog';
 
 interface LibraryAsset {
     id: string;
@@ -60,6 +61,44 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
         }
     };
 
+    // 导入本地视频/图片到素材库（归入当前分类，「All」时归入 Others）
+    const importInputRef = useRef<HTMLInputElement>(null);
+    const [importing, setImporting] = useState(false);
+
+    const handleImportFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+        setImporting(true);
+        let failed = 0;
+        const category = selectedCategory === 'All' ? 'Others' : selectedCategory;
+        for (const file of files) {
+            try {
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const fr = new FileReader();
+                    fr.onload = () => resolve(fr.result as string);
+                    fr.onerror = reject;
+                    fr.readAsDataURL(file);
+                });
+                const res = await fetch('http://localhost:3501/api/library', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sourceUrl: dataUrl,
+                        name: file.name.replace(/\.[^.]+$/, ''),
+                        category,
+                    }),
+                });
+                if (!res.ok) throw new Error();
+            } catch (_) {
+                failed++;
+            }
+        }
+        setImporting(false);
+        if (importInputRef.current) importInputRef.current.value = '';
+        if (failed > 0) showAppAlert(`${failed} 个文件导入失败`);
+        await fetchLibrary();
+    };
+
     const handleDeleteAsset = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent selection
         // Confirmation is now handled in the UI before this is called
@@ -97,6 +136,7 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
                         </button>
                     </div>
                     {/* Reuse internal content logic */}
+                    <input ref={importInputRef} type="file" multiple accept="image/*,video/*" onChange={handleImportFiles} className="hidden" />
                     <AssetLibraryContent
                         selectedCategory={selectedCategory}
                         setSelectedCategory={setSelectedCategory}
@@ -106,6 +146,8 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
                         onDeleteAsset={handleDeleteAsset}
                         variant={variant}
                         canvasTheme={canvasTheme}
+                        importing={importing}
+                        onImportClick={() => importInputRef.current?.click()}
                     />
                 </div>
                 {/* Click outside to close */}
@@ -119,6 +161,7 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
             className={`fixed left-20 z-40 w-[700px] backdrop-blur-xl border rounded-2xl shadow-2xl flex flex-col max-h-[500px] overflow-hidden animate-in slide-in-from-left-4 duration-200 transition-colors ${isDark ? 'bg-[#0a0a0a]/95 border-neutral-800' : 'bg-white/95 border-neutral-200'}`}
             style={{ top: Math.min(window.innerHeight - 510, Math.max(20, panelY)) }}
         >
+            <input ref={importInputRef} type="file" multiple accept="image/*,video/*" onChange={handleImportFiles} className="hidden" />
             <AssetLibraryContent
                 selectedCategory={selectedCategory}
                 setSelectedCategory={setSelectedCategory}
@@ -128,6 +171,8 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
                 onDeleteAsset={handleDeleteAsset}
                 variant={variant}
                 canvasTheme={canvasTheme}
+                importing={importing}
+                onImportClick={() => importInputRef.current?.click()}
             />
         </div>
     );
@@ -136,7 +181,8 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
 // Extracted Internal Component for reuse
 const AssetLibraryContent = ({
     selectedCategory, setSelectedCategory,
-    assets, loading, onSelectAsset, onDeleteAsset, variant, canvasTheme = 'dark'
+    assets, loading, onSelectAsset, onDeleteAsset, variant, canvasTheme = 'dark',
+    importing, onImportClick
 }: any) => {
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
     const isDark = canvasTheme === 'dark';
@@ -164,20 +210,31 @@ const AssetLibraryContent = ({
         <>
 
             <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
-                {/* Filters */}
-                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide shrink-0">
-                    {CATEGORIES.map(cat => (
-                        <button
-                            key={cat}
-                            onClick={() => setSelectedCategory(cat)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${selectedCategory === cat
-                                ? isDark ? 'bg-neutral-100 text-black border-white' : 'bg-neutral-900 text-white border-neutral-900'
-                                : isDark ? 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-600' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-                                }`}
-                        >
-                            {cat}
-                        </button>
-                    ))}
+                {/* Filters + 导入 */}
+                <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide flex-1 min-w-0">
+                        {CATEGORIES.map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => setSelectedCategory(cat)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${selectedCategory === cat
+                                    ? isDark ? 'bg-neutral-100 text-black border-white' : 'bg-neutral-900 text-white border-neutral-900'
+                                    : isDark ? 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-600' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+                                    }`}
+                            >
+                                {cat}
+                            </button>
+                        ))}
+                    </div>
+                    <button
+                        onClick={onImportClick}
+                        disabled={importing}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 mb-2 rounded-full text-xs font-medium whitespace-nowrap border transition-colors disabled:opacity-50 ${isDark ? 'bg-neutral-800 hover:bg-neutral-700 text-white border-neutral-700' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border-neutral-300'}`}
+                        title="导入本地视频/图片到当前分类（可多选）"
+                    >
+                        {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        导入
+                    </button>
                 </div>
 
                 {/* Content */}
