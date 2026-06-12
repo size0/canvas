@@ -317,27 +317,28 @@ const AssetLibraryContent = ({
                 {/* Filters + 导入 */}
                 <div className="flex items-center gap-2 shrink-0">
                     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide flex-1 min-w-0 items-center">
+                        {/* 删除 × 放在药丸内部（悬停展开）：分类行是 overflow-x-auto，
+                            外挂角标会被纵向裁剪，内嵌则完全不受影响 */}
                         {allCategories.map(cat => (
-                            <div key={cat} className="relative group/cat shrink-0 hover:z-20">
-                                <button
-                                    onClick={() => setSelectedCategory(cat)}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${selectedCategory === cat
-                                        ? isDark ? 'bg-neutral-100 text-black border-white' : 'bg-neutral-900 text-white border-neutral-900'
-                                        : isDark ? 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-600' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-                                        }`}
-                                >
-                                    {cat}
-                                </button>
+                            <button
+                                key={cat}
+                                onClick={() => setSelectedCategory(cat)}
+                                className={`group/cat shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${selectedCategory === cat
+                                    ? isDark ? 'bg-neutral-100 text-black border-white' : 'bg-neutral-900 text-white border-neutral-900'
+                                    : isDark ? 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-600' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+                                    }`}
+                            >
+                                {cat}
                                 {cat !== 'All' && (
-                                    <button
+                                    <span
                                         onClick={(e) => { e.stopPropagation(); onDeleteCategory?.(cat); }}
-                                        className="absolute -top-1 -right-1 z-30 w-3.5 h-3.5 rounded-full bg-red-500 text-white items-center justify-center hidden group-hover/cat:flex hover:bg-red-600"
+                                        className="ml-1 -mr-1.5 w-4 h-4 rounded-full hidden group-hover/cat:inline-flex items-center justify-center opacity-60 hover:opacity-100 hover:bg-red-500 hover:!text-white transition-colors"
                                         title="删除该分类（素材自动归入剩余分类）"
                                     >
-                                        <X size={9} />
-                                    </button>
+                                        <X size={10} />
+                                    </span>
                                 )}
-                            </div>
+                            </button>
                         ))}
                         {addingCategory ? (
                             <input
