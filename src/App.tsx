@@ -596,7 +596,8 @@ export default function App() {
       };
     };
     const assetNodes: NodeData[] = [
-      ...(result.characters || []).map(c => makeAsset(c, '角色', '3:4')),
+      // 角色资产用三视图设定图（左半面部特写 + 右半正/侧/背三视图），横构图 16:9
+      ...(result.characters || []).map(c => makeAsset(c, '角色', '16:9')),
       ...(result.scenes || []).map(s => makeAsset(s, '场景', ratio)),
       ...(result.props || []).map(p => makeAsset(p, '道具', '1:1')),
     ];
