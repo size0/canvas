@@ -13,7 +13,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
     X, Play, Pause, Plus, Trash2, ChevronUp, ChevronDown, Scissors,
     Loader2, Download, Mic, Captions, Sparkles, Film, ArrowLeftRight, Check,
-    Undo2, Redo2
+    Undo2, Redo2, Maximize2, Minimize2
 } from 'lucide-react';
 import { showAppConfirm } from '../ui/AppDialog';
 
@@ -485,6 +485,22 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     const [videoBoxH, setVideoBoxH] = useState(360); // 预览视频实际显示高度（字幕字号按比例缩放）
     const previewAreaRef = useRef<HTMLDivElement>(null);
     const [previewSize, setPreviewSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 }); // 预览区可用尺寸
+
+    // 最大化播放：把「预览 + 播放控制条」整列全屏（含贴纸/字幕叠加层），Esc 或再点一次退出
+    const previewColRef = useRef<HTMLDivElement>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    useEffect(() => {
+        const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', onFsChange);
+        return () => document.removeEventListener('fullscreenchange', onFsChange);
+    }, []);
+    const toggleFullscreen = useCallback(() => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => { });
+        } else {
+            previewColRef.current?.requestFullscreen().catch(() => { });
+        }
+    }, []);
 
     // ---- 预览转场（幽灵帧叠加）----
     const ghostCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1978,8 +1994,13 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 </div>
 
                 {/* --- 中：预览 --- */}
-                <div className="flex-1 flex flex-col min-w-0">
-                    <div ref={previewAreaRef} className="flex-1 flex items-center justify-center bg-black relative min-h-0 overflow-hidden">
+                <div ref={previewColRef} className="flex-1 flex flex-col min-w-0 bg-[#0a0a0b]">
+                    <div
+                        ref={previewAreaRef}
+                        className="flex-1 flex items-center justify-center bg-black relative min-h-0 overflow-hidden"
+                        onDoubleClick={() => { if (clips.length > 0) toggleFullscreen(); }}
+                        title="双击切换全屏播放"
+                    >
                         {clips.length === 0 ? (
                             <div className="text-neutral-600 text-sm">从左侧素材库点击视频添加到时间轴</div>
                         ) : (
@@ -1990,8 +2011,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                     playsInline
                                     style={{
                                         // 像素级约束 + 适当留白（预览不要顶满）
-                                        maxWidth: previewSize.w > 0 ? Math.round(previewSize.w * 0.82) : '100%',
-                                        maxHeight: previewSize.h > 0 ? Math.round(previewSize.h * 0.92) : '100%',
+                                        maxWidth: previewSize.w > 0 ? Math.round(previewSize.w * (isFullscreen ? 0.98 : 0.82)) : '100%',
+                                        maxHeight: previewSize.h > 0 ? Math.round(previewSize.h * (isFullscreen ? 0.97 : 0.92)) : '100%',
                                         display: curClip?.isImage ? 'none' : 'block',
                                         ...(curClip && !curClip.isImage ? {
                                             filter: `brightness(${(1 + curClip.eq.brightness).toFixed(2)}) contrast(${curClip.eq.contrast.toFixed(2)}) saturate(${curClip.eq.saturation.toFixed(2)})${curFx?.css ? ' ' + curFx.css : ''}`,
@@ -2006,8 +2027,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                         src={curClip.url.startsWith('http') ? curClip.url : `http://localhost:3501${curClip.url}`}
                                         className="block"
                                         style={{
-                                            maxWidth: previewSize.w > 0 ? Math.round(previewSize.w * 0.82) : '100%',
-                                            maxHeight: previewSize.h > 0 ? Math.round(previewSize.h * 0.92) : '100%',
+                                            maxWidth: previewSize.w > 0 ? Math.round(previewSize.w * (isFullscreen ? 0.98 : 0.82)) : '100%',
+                                            maxHeight: previewSize.h > 0 ? Math.round(previewSize.h * (isFullscreen ? 0.97 : 0.92)) : '100%',
                                             filter: `brightness(${(1 + curClip.eq.brightness).toFixed(2)}) contrast(${curClip.eq.contrast.toFixed(2)}) saturate(${curClip.eq.saturation.toFixed(2)})${curFx?.css ? ' ' + curFx.css : ''}`,
                                             transform: `translate(${(curClip.posX * 100).toFixed(1)}%, ${(curClip.posY * 100).toFixed(1)}%) rotate(${curClip.rotate}deg) scaleX(${curClip.flipH ? -curClip.scale : curClip.scale}) scaleY(${curClip.flipV ? -curClip.scale : curClip.scale})`,
                                         }}
@@ -2120,8 +2141,19 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             {importingMusic ? <Loader2 size={12} className="animate-spin" /> : '🎵'} 导入音乐
                         </button>
                         <div className="flex-1" />
-                        <span className="text-[10px] text-neutral-500" title="也可以在时间轴上直接滚动鼠标滚轮缩放">缩放（滚轮可缩放）</span>
-                        <input type="range" min={2} max={200} value={pxPerSec} onChange={e => setPxPerSec(Number(e.target.value))} className="w-28" />
+                        <button
+                            onClick={toggleFullscreen}
+                            disabled={clips.length === 0}
+                            className="flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 disabled:opacity-40"
+                            title={isFullscreen ? '退出全屏 (Esc)' : '最大化播放预览'}
+                        >
+                            {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                            {isFullscreen ? '退出全屏' : '最大化'}
+                        </button>
+                        {!isFullscreen && <>
+                            <span className="text-[10px] text-neutral-500" title="也可以在时间轴上直接滚动鼠标滚轮缩放">缩放（滚轮可缩放）</span>
+                            <input type="range" min={2} max={200} value={pxPerSec} onChange={e => setPxPerSec(Number(e.target.value))} className="w-28" />
+                        </>}
                     </div>
                 </div>
 
