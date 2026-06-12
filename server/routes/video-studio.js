@@ -212,6 +212,12 @@ router.post('/script', async (req, res) => {
 // 智能字幕：语音识别（OpenAI 兼容 /audio/transcriptions 接口）
 // ============================================================================
 
+/** 去掉字幕末尾的标点（字幕惯例：句中标点保留，句尾标点不显示） */
+function stripTrailingPunct(s) {
+    const t = String(s).replace(/[，。！？、；：…,.!?;:\s]+$/u, '');
+    return t || String(s).trim(); // 全是标点的极端情况保留原文
+}
+
 /** 把识别文本切成适合做字幕的短句：先按句末标点切，过长的再按逗号细分，仍超长则按字数硬切 */
 function splitSubtitleText(text, maxLen = 22) {
     const sentences = String(text).split(/(?<=[。！？!?；;…])|\n+/).map(s => s.trim()).filter(Boolean);
@@ -227,7 +233,7 @@ function splitSubtitleText(text, maxLen = 22) {
         while (buf.length > maxLen) { pieces.push(buf.slice(0, maxLen)); buf = buf.slice(maxLen); }
         if (buf) pieces.push(buf);
     }
-    return pieces;
+    return pieces.map(stripTrailingPunct);
 }
 
 /** 用 ffmpeg silencedetect 找语音区间（秒，相对音频开头）；失败时退化为整段 */
@@ -393,14 +399,14 @@ router.post('/transcribe', async (req, res) => {
                 for (const s of data.segments) {
                     const txt = String(s.text || '').trim();
                     if (!txt) continue;
-                    out.push({ start: +toTimeline(s.start).toFixed(2), end: +toTimeline(s.end).toFixed(2), text: txt });
+                    out.push({ start: +toTimeline(s.start).toFixed(2), end: +toTimeline(s.end).toFixed(2), text: stripTrailingPunct(txt) });
                 }
                 recognizedAny = true;
             } else if (data.text && String(data.text).trim()) {
                 out.push({
                     start: +toTimeline(0).toFixed(2),
                     end: +toTimeline(srcDur).toFixed(2),
-                    text: String(data.text).trim(),
+                    text: stripTrailingPunct(String(data.text).trim()),
                 });
                 recognizedAny = true;
             }

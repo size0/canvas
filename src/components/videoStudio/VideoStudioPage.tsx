@@ -1663,7 +1663,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || '语音合成失败');
                 newAudios.push({ id: uid(), url: data.url, text: sentences[i], start: cursor, duration: data.duration, inPoint: 0, outPoint: data.duration, volume: 1, muted: false, speed: 1, fadeIn: 0, fadeOut: 0 });
-                newSubs.push({ id: uid(), text: sentences[i], start: cursor, end: cursor + data.duration, style: { ...defaultStyle } });
+                // 字幕显示去掉句尾标点（朗读文本保留标点以保证停顿语气）
+                newSubs.push({ id: uid(), text: sentences[i].replace(/[，。！？、；：…,.!?;:\s]+$/u, '') || sentences[i], start: cursor, end: cursor + data.duration, style: { ...defaultStyle } });
                 cursor += data.duration + 0.15;
             }
             setAudios(prev => [...prev, ...newAudios]);
