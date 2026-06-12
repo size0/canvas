@@ -103,7 +103,13 @@ interface AudioItem {
     fadeIn: number;    // 淡入秒数（导出生效）
     fadeOut: number;   // 淡出秒数（导出生效）
     isMusic?: boolean; // 是否为导入的音乐
+    track?: number;    // 所属音轨（0 起；可分人声/背景声/BGM 等多轨）
 }
+
+/** 音频条目所属音轨（兼容旧数据：缺省为 0） */
+const aTrack = (a: AudioItem) => Math.max(0, a.track ?? 0);
+
+const MAX_AUDIO_LANES = 4;
 
 /** 音频条目在时间轴上的有效时长（裁剪 + 变速后） */
 const audioDur = (a: AudioItem) => (a.outPoint - a.inPoint) / a.speed;
@@ -397,6 +403,23 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     const [videoTrackMuted, setVideoTrackMuted] = useState(false);
     const [audioTrackMuted, setAudioTrackMuted] = useState(false);
 
+    // ---- 多音轨（人声/背景声/BGM 等分轨；逐轨静音）----
+    const [audioLaneCount, setAudioLaneCount] = useState(2);
+    const [audioLaneMuted, setAudioLaneMuted] = useState<boolean[]>([]);
+    // 有效音轨数：用户设置的轨道数与条目实际占用的最大轨道取大者
+    const audioLanes = useMemo(
+        () => Math.min(MAX_AUDIO_LANES, Math.max(1, audioLaneCount, ...audios.map(a => aTrack(a) + 1))),
+        [audioLaneCount, audios]
+    );
+    /** 找一条在 [start, end) 时间段没有内容重叠的音轨；都被占用则返回新轨（不超上限） */
+    const findFreeAudioLane = useCallback((start: number, end: number, minLane = 0): number => {
+        for (let L = minLane; L < audioLanes; L++) {
+            const overlap = audios.some(a => aTrack(a) === L && start < a.start + audioDur(a) && end > a.start);
+            if (!overlap) return L;
+        }
+        return Math.min(MAX_AUDIO_LANES - 1, audioLanes);
+    }, [audios, audioLanes]);
+
     // ---- 撤销 / 重做（历史栈，覆盖 片段/转场/字幕/音频 四类数据）----
     interface HistorySnapshot {
         clips: Clip[];
@@ -621,6 +644,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 clips, transitions, subtitles, audios, stickers,
                 defaultStyle, resolution, voice, script,
                 videoTrackMuted, audioTrackMuted,
+                audioLaneCount: audioLanes, audioLaneMuted,
             };
             const r = await fetch('/api/edit-projects', {
                 method: 'POST',
@@ -641,7 +665,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             setSavingProject(false);
         }
     }, [currentProjectId, currentProjectName, clips, transitions, subtitles, audios, stickers,
-        defaultStyle, resolution, voice, script, videoTrackMuted, audioTrackMuted, refreshProjects]);
+        defaultStyle, resolution, voice, script, videoTrackMuted, audioTrackMuted,
+        audioLanes, audioLaneMuted, refreshProjects]);
 
     /** 打开历史剪辑项目，恢复全部时间轴状态 */
     const handleOpenProject = useCallback(async (id: string) => {
@@ -669,7 +694,14 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             if (d.voice) setVoice(d.voice);
             if (typeof d.script === 'string') setScript(d.script);
             setVideoTrackMuted(!!d.videoTrackMuted);
-            setAudioTrackMuted(!!d.audioTrackMuted);
+            // 旧项目的「配音轨整体静音」映射为所有音轨静音（全局开关已由逐轨静音取代）
+            const laneCount = Math.min(MAX_AUDIO_LANES, Math.max(1, Number(d.audioLaneCount) || 2));
+            setAudioLaneCount(laneCount);
+            setAudioLaneMuted(
+                Array.isArray(d.audioLaneMuted) ? d.audioLaneMuted.map(Boolean)
+                    : d.audioTrackMuted ? Array(laneCount).fill(true) : []
+            );
+            setAudioTrackMuted(false);
             // 重置播放与撤销历史（避免跨项目撤销）
             setSelected(null);
             setPlayhead(0);
@@ -860,7 +892,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             if (!el) return;
             const effDur = audioDur(a);
             const inRange = t >= a.start && t < a.start + effDur;
-            const isMuted = audioTrackMuted || a.muted || a.volume === 0;
+            const isMuted = audioTrackMuted || a.muted || a.volume === 0 || !!audioLaneMuted[aTrack(a)];
             if (playingRef.current && inRange && !isMuted) {
                 const want = a.inPoint + (t - a.start) * a.speed; // 映射回素材时间（含裁剪入点）
                 el.playbackRate = a.speed;
@@ -889,7 +921,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         }
 
         rafRef.current = requestAnimationFrame(tick);
-    }, [clips, clipStarts, audios, syncVideoTo, audioTrackMuted, startTransPreview]);
+    }, [clips, clipStarts, audios, syncVideoTo, audioTrackMuted, audioLaneMuted, startTransPreview]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -1166,6 +1198,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 id: uid(), url: data.url, text: `🎵 ${file.name}`, start: playheadRef.current,
                 duration: data.duration, inPoint: 0, outPoint: data.duration,
                 volume: 0.8, muted: false, speed: 1, fadeIn: 0, fadeOut: 0, isMusic: true,
+                // 音乐优先放音轨 2 之后的空闲轨道（音轨 1 留给人声/配音）
+                track: findFreeAudioLane(playheadRef.current, playheadRef.current + data.duration, 1),
             };
             setAudios(prev => [...prev, item]);
             setSelected({ kind: 'audio', id: item.id });
@@ -1226,6 +1260,34 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         });
         setSelected({ kind: 'clip', id: right.id });
         currentClipIdxRef.current = -1;
+    };
+
+    /** 分离音频：把视频片段的原声提取为独立音频条目（放到空闲音轨），片段本身静音 */
+    const detachAudioFromClip = (clipId: string) => {
+        const idx = clips.findIndex(c => c.id === clipId);
+        if (idx < 0) return;
+        const c = clips[idx];
+        if (c.isImage) { setErrorMsg('图片片段没有音频可分离'); return; }
+        const start = clipStarts[idx];
+        const lane = findFreeAudioLane(start, start + clipDur(c));
+        const item: AudioItem = {
+            id: uid(),
+            url: c.url,
+            text: `🎬 ${c.name} 原声`,
+            start,
+            duration: c.sourceDuration,
+            inPoint: c.inPoint,
+            outPoint: c.outPoint,
+            volume: c.volume,
+            muted: false,
+            speed: c.speed,
+            fadeIn: 0,
+            fadeOut: 0,
+            track: lane,
+        };
+        updateClip(clipId, { muted: true });
+        setAudios(prev => [...prev, item]);
+        setSelected({ kind: 'audio', id: item.id });
     };
 
     /** 复制片段（插入到原片段之后） */
@@ -1314,11 +1376,14 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         setMultiSel(all);
     };
 
-    /** 框选命中计算：行高与时间轴渲染保持一致（标尺 24px + 每轨 56px） */
+    /** 框选命中计算：行高与时间轴渲染保持一致（标尺 24px + 每轨 56px + 添加音轨行 24px） */
     const computeMarqueeSelection = (x: number, y: number, w: number, h: number) => {
         const sel = new Set<string>();
         const xs = x, xe = x + w, ys = y, ye = y + h;
         const hitRow = (top: number, bottom: number) => ye > top && ys < bottom;
+        const audioTop = 80;                              // 标尺 24 + 视频轨 56
+        const subTop = audioTop + audioLanes * 56 + 24;   // 音轨 N 条 + 「添加音轨」行
+        const stickerTop = subTop + 56;
         if (hitRow(24, 80)) {
             let cx = 0;
             for (const c of clips) {
@@ -1327,15 +1392,17 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 cx += cw;
             }
         }
-        if (hitRow(80, 136)) audios.forEach(a => {
+        audios.forEach(a => {
+            const top = audioTop + aTrack(a) * 56;
+            if (!hitRow(top, top + 56)) return;
             const l = a.start * pxPerSec, iw = Math.max(audioDur(a) * pxPerSec, 24);
             if (xe > l && xs < l + iw) sel.add(`audio:${a.id}`);
         });
-        if (hitRow(136, 192)) subtitles.forEach(s => {
+        if (hitRow(subTop, subTop + 56)) subtitles.forEach(s => {
             const l = s.start * pxPerSec, iw = Math.max((s.end - s.start) * pxPerSec, 24);
             if (xe > l && xs < l + iw) sel.add(`sub:${s.id}`);
         });
-        if (hitRow(192, 248)) stickers.forEach(s => {
+        if (hitRow(stickerTop, stickerTop + 56)) stickers.forEach(s => {
             const l = s.start * pxPerSec, iw = Math.max((s.end - s.start) * pxPerSec, 24);
             if (xe > l && xs < l + iw) sel.add(`sticker:${s.id}`);
         });
@@ -1359,9 +1426,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         currentClipIdxRef.current = -1;
     };
 
-    // ---- 拖拽（配音/字幕/贴纸块水平移动；多选时整组移动）----
+    // ---- 拖拽（配音/字幕/贴纸块水平移动；音频块可上下拖动换轨；多选时整组移动）----
     const dragRef = useRef<{
         kind: 'sub' | 'audio' | 'sticker'; id: string; startX: number; orig: number;
+        startY?: number; origTrack?: number;
         group?: { kind: 'sub' | 'audio' | 'sticker'; id: string; orig: number }[];
     } | null>(null);
 
@@ -1389,7 +1457,11 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         } else if (!multiSel.has(key) && multiSel.size > 0) {
             setMultiSel(new Set()); // 点击未选中的项 → 退出多选
         }
-        dragRef.current = { kind, id, startX: e.clientX, orig: origStart, group };
+        dragRef.current = {
+            kind, id, startX: e.clientX, orig: origStart, group,
+            startY: e.clientY,
+            origTrack: kind === 'audio' ? aTrack(audios.find(a => a.id === id) || ({} as AudioItem)) : 0,
+        };
         setSelected({ kind, id });
     };
 
@@ -1409,7 +1481,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         }
         const newStart = Math.max(0, d.orig + delta);
         if (d.kind === 'audio') {
-            setAudios(prev => prev.map(a => a.id === d.id ? { ...a, start: newStart } : a));
+            // 垂直拖动跨音轨（每轨 56px）
+            const laneDelta = Math.round((e.clientY - (d.startY ?? e.clientY)) / 56);
+            const newTrack = Math.min(audioLanes - 1, Math.max(0, (d.origTrack ?? 0) + laneDelta));
+            setAudios(prev => prev.map(a => a.id === d.id ? { ...a, start: newStart, track: newTrack } : a));
         } else if (d.kind === 'sticker') {
             setStickers(prev => prev.map(s => s.id === d.id ? { ...s, start: newStart, end: newStart + (s.end - s.start) } : s));
         } else {
@@ -1855,7 +1930,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || '语音合成失败');
-                newAudios.push({ id: uid(), url: data.url, text: sentences[i], start: cursor, duration: data.duration, inPoint: 0, outPoint: data.duration, volume: 1, muted: false, speed: 1, fadeIn: 0, fadeOut: 0 });
+                newAudios.push({ id: uid(), url: data.url, text: sentences[i], start: cursor, duration: data.duration, inPoint: 0, outPoint: data.duration, volume: 1, muted: false, speed: 1, fadeIn: 0, fadeOut: 0, track: 0 });
                 // 字幕显示去掉句尾标点（朗读文本保留标点以保证停顿语气）
                 newSubs.push({ id: uid(), text: sentences[i].replace(/[，。！？、；：…,.!?;:\s]+$/u, '') || sentences[i], start: cursor, end: cursor + data.duration, style: { ...defaultStyle } });
                 cursor += data.duration + 0.15;
@@ -1953,7 +2028,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                     subtitles: subtitles.map(s => ({ text: s.text, start: s.start, end: s.end, style: s.style })),
                     subtitleStyle: defaultStyle,
                     audios: audios.map(a => ({
-                        url: a.url, start: a.start, volume: a.volume, muted: a.muted,
+                        url: a.url, start: a.start, volume: a.volume,
+                        // 逐轨静音在客户端折算到条目级（服务端无需感知音轨）
+                        muted: a.muted || !!audioLaneMuted[aTrack(a)],
                         speed: a.speed, fadeIn: a.fadeIn, fadeOut: a.fadeOut, duration: a.duration,
                         inPoint: a.inPoint, outPoint: a.outPoint,
                     })),
@@ -2704,6 +2781,21 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                     className="flex-1 disabled:opacity-40" />
                                 <span className="text-[10px] text-neutral-500 w-9 text-right">{Math.round(selAudio.volume * 100)}%</span>
                             </div>
+                            {/* 所属音轨（上下拖动音频块也可换轨） */}
+                            <div className="text-[11px] text-neutral-400">
+                                所属音轨
+                                <div className="flex gap-1 mt-1">
+                                    {Array.from({ length: audioLanes }).map((_, L) => (
+                                        <button
+                                            key={L}
+                                            onClick={() => setAudios(p => p.map(a => a.id === selAudio.id ? { ...a, track: L } : a))}
+                                            className={`flex-1 text-[10px] py-1 rounded border ${aTrack(selAudio) === L ? 'bg-purple-600/40 border-purple-500 text-purple-200' : 'bg-neutral-900 border-neutral-700 text-neutral-500 hover:border-neutral-500'}`}
+                                        >
+                                            音轨{L + 1}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                             {/* 音频变速：拖动条 + 数字输入 */}
                             <label className="block text-[11px] text-neutral-400">
                                 倍速 {selAudio.speed.toFixed(2)}x（变速后 {audioDur(selAudio).toFixed(1)}s）
@@ -3020,7 +3112,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             </div>
 
             {/* ===== 底部时间轴 ===== */}
-            <div className="relative h-[276px] border-t border-neutral-800 flex flex-shrink-0 bg-[#0e0e0e]">
+            <div
+                className="relative border-t border-neutral-800 flex flex-shrink-0 bg-[#0e0e0e]"
+                style={{ height: 248 + audioLanes * 56 }}
+            >
                 {/* 多选浮动工具栏 */}
                 {multiSel.size > 0 && (
                     <div className="absolute -top-10 right-4 z-[60] flex items-center gap-2 px-3 py-1.5 bg-neutral-900/95 border border-neutral-700 rounded-full shadow-2xl text-[11px] backdrop-blur-sm">
@@ -3053,14 +3148,45 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             {videoTrackMuted ? '🔇' : '🔊'}
                         </button>
                     </div>
-                    <div className="h-14 flex flex-col items-center justify-center gap-0.5 border-b border-neutral-900">
-                        <span className="text-[10px] text-neutral-400 font-medium">配音</span>
+                    {Array.from({ length: audioLanes }).map((_, L) => {
+                        const laneEmpty = !audios.some(a => aTrack(a) === L);
+                        const isLast = L === audioLanes - 1;
+                        return (
+                            <div key={L} className="h-14 flex flex-col items-center justify-center gap-0.5 border-b border-neutral-900">
+                                <span className="text-[10px] text-neutral-400 font-medium">音轨{L + 1}</span>
+                                <div className="flex items-center gap-0.5">
+                                    <button
+                                        onClick={() => setAudioLaneMuted(prev => { const n = [...prev]; n[L] = !n[L]; return n; })}
+                                        className={`px-1.5 rounded text-[10px] ${audioLaneMuted[L] ? 'bg-red-600/40 text-red-300' : 'bg-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                                        title={audioLaneMuted[L] ? `取消音轨${L + 1}静音` : `静音音轨${L + 1}`}
+                                    >
+                                        {audioLaneMuted[L] ? '🔇' : '🔊'}
+                                    </button>
+                                    {isLast && laneEmpty && audioLanes > 1 && (
+                                        <button
+                                            onClick={() => {
+                                                setAudioLaneCount(audioLanes - 1);
+                                                setAudioLaneMuted(prev => prev.slice(0, audioLanes - 1));
+                                            }}
+                                            className="px-1 rounded text-[10px] bg-neutral-800 text-neutral-600 hover:text-red-400"
+                                            title="删除这条空音轨"
+                                        >
+                                            ×
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {/* 添加音轨 */}
+                    <div className="h-6 flex items-center justify-center border-b border-neutral-900">
                         <button
-                            onClick={() => setAudioTrackMuted(m => !m)}
-                            className={`px-1.5 rounded text-[10px] ${audioTrackMuted ? 'bg-red-600/40 text-red-300' : 'bg-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                            title={audioTrackMuted ? '取消配音轨整体静音' : '配音轨整体静音'}
+                            onClick={() => setAudioLaneCount(Math.min(MAX_AUDIO_LANES, audioLanes + 1))}
+                            disabled={audioLanes >= MAX_AUDIO_LANES}
+                            className="text-[10px] text-neutral-600 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={audioLanes >= MAX_AUDIO_LANES ? `最多 ${MAX_AUDIO_LANES} 条音轨` : '添加一条音轨（人声/背景声/BGM 分轨）'}
                         >
-                            {audioTrackMuted ? '🔇' : '🔊'}
+                            ＋ 音轨
                         </button>
                     </div>
                     <div className="h-14 flex items-center justify-center border-b border-neutral-900">
@@ -3212,9 +3338,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             </div>
                         </div>
 
-                        {/* 配音轨 */}
-                        <div className="h-14 relative border-b border-neutral-900">
-                            {audios.map(a => {
+                        {/* 配音轨（多音轨：人声/背景声/BGM 分轨，音频块可上下拖动换轨） */}
+                        {Array.from({ length: audioLanes }).map((_, L) => (
+                        <div key={`lane${L}`} className="h-14 relative border-b border-neutral-900">
+                            {audios.filter(a => aTrack(a) === L).map(a => {
                                 const isSel = (selected?.kind === 'audio' && selected.id === a.id) || multiSel.has(`audio:${a.id}`);
                                 return (
                                     <div
@@ -3234,7 +3361,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                         <div className={`h-full flex items-center text-[10px] truncate pointer-events-none ${a.isMusic ? 'text-green-300' : 'text-purple-300'}`}>
                                             {a.isMusic ? '' : '🎙 '}{a.text}
                                             {a.speed !== 1 && <span className="ml-1 px-0.5 rounded bg-black/40">{a.speed}x</span>}
-                                            {(a.muted || audioTrackMuted) && ' 🔇'}
+                                            {(a.muted || audioTrackMuted || audioLaneMuted[L]) && ' 🔇'}
                                         </div>
                                         {/* 左右裁剪手柄 */}
                                         <div
@@ -3255,6 +3382,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                 );
                             })}
                         </div>
+                        ))}
+                        {/* 添加音轨行（与轨道头对齐的空行） */}
+                        <div className="h-6 border-b border-neutral-900" />
 
                         {/* 字幕轨 */}
                         <div className="h-14 relative border-b border-neutral-900">
@@ -3346,7 +3476,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                         className="fixed w-44 bg-[#1d1d1d] border border-neutral-700 rounded-lg shadow-2xl z-[400] py-1"
                         style={{
                             left: Math.min(ctxMenu.x, window.innerWidth - 185),
-                            top: Math.min(ctxMenu.y, window.innerHeight - 220),
+                            top: Math.min(ctxMenu.y, window.innerHeight - 260),
                         }}
                         onPointerDown={e => e.stopPropagation()}
                     >
@@ -3377,12 +3507,21 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                     粘贴 <span className="text-[10px] text-neutral-500">Ctrl+V</span>
                                 </button>
                                 {(ctxMenu.target as any).kind === 'clip' && (
-                                    <button
-                                        onClick={() => { splitAtPlayhead(); setCtxMenu(null); }}
-                                        className="w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-neutral-800 text-neutral-200 border-t border-neutral-800"
-                                    >
-                                        在播放头处分割
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={() => { splitAtPlayhead(); setCtxMenu(null); }}
+                                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-neutral-800 text-neutral-200 border-t border-neutral-800"
+                                        >
+                                            在播放头处分割
+                                        </button>
+                                        <button
+                                            onClick={() => { detachAudioFromClip((ctxMenu.target as any).id); setCtxMenu(null); }}
+                                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-neutral-800 text-neutral-200"
+                                            title="把片段原声提取为独立音频条目（片段本身静音）"
+                                        >
+                                            分离音频
+                                        </button>
+                                    </>
                                 )}
                                 {(ctxMenu.target as any).kind === 'audio' && (
                                     <button
