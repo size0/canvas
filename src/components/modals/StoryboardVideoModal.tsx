@@ -35,11 +35,12 @@ const VIDEO_RESOLUTIONS = ["Auto", "1080p", "768p", "720p", "512p"];
 
 const VIDEO_MODELS = [
     // gpt2api.com 视频模型
-    { id: 'grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', recommended: true, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'] },
-    { id: 'sora', name: 'Sora 2', provider: 'gpt2api', durations: [4, 8, 12], resolutions: ['720p', '1080p'] },
+    { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', recommended: true, durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
     { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
     { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
-    { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
+    { id: 'sora', name: 'Sora 2', provider: 'gpt2api', durations: [4, 8, 12], resolutions: ['720p', '1080p'] },
+    // grok-imagine-video 结果托管在 assets.grok.com（防盗链），下载会 403，暂不可用
+    { id: 'grok-imagine-video', name: 'Grok Imagine（下载受限）', provider: 'gpt2api', durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'] },
     {
         id: 'veo-3.1',
         name: 'Veo 3.1',
@@ -85,8 +86,8 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
 
     const [prompts, setPrompts] = useState<Record<string, string>>({});
     const [settings, setSettings] = useState({
-        model: 'grok-imagine-video',
-        duration: 6, // gpt2api Grok 默认 6s
+        model: 'veo3.1-lite',
+        duration: 6,
         resolution: '720p' // Safe default
     });
     const [generatingPrompts, setGeneratingPrompts] = useState<Record<string, boolean>>({});

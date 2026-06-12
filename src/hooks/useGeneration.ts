@@ -368,7 +368,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
             const msg = error.toString().toLowerCase();
             let errorMessage = error.message || 'Generation failed';
 
-            if (msg.includes('permission_denied') || msg.includes('403')) {
+            if (msg.includes('permission_denied')) {
                 errorMessage = 'Permission denied. Check API Key configuration.';
             } else if (msg.includes('unable to process input image') || msg.includes('invalid_argument')) {
                 errorMessage = '⚠️ Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';

@@ -562,7 +562,7 @@ export default function App() {
       status: NodeStatus.IDLE,
       model: 'Banana Pro',
       imageModel: 'nano-banana-pro',
-      videoModel: 'grok-imagine-video',
+      videoModel: 'veo3.1-lite',
       resolution: '1K',
     };
 
@@ -1337,6 +1337,35 @@ export default function App() {
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleGlobalContextMenu}
       >
+        {/* Background Grid：画在屏幕空间（不放进 transform 层），跟随 viewport 平移/缩放平铺。
+            这样网格是无限的——不再受固定尺寸网格板的边界限制，缩到 10% 也铺满全屏。
+            细网格 + 每 5 格一条主线；缩小时细格屏幕间距过密则隐藏，只留主线。 */}
+        {(() => {
+          const z = viewport.zoom || 1;
+          const sMinor = 28 * z;                     // 细格屏幕间距
+          const sMajor = 140 * z;                    // 主线屏幕间距
+          const lwMinor = Math.max(1, z);            // 细线屏幕宽：≥1px，放大时随之加粗
+          const lwMajor = Math.max(1.5, 1.6 * z);    // 主线更粗
+          const showMinor = sMinor >= 13;            // 细格过密时隐藏
+          const minorColor = canvasTheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.065)';
+          const majorColor = canvasTheme === 'dark' ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.14)';
+          const mc = showMinor ? minorColor : 'transparent';
+          const pos = `${viewport.x}px ${viewport.y}px`;
+          return (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                backgroundImage: `linear-gradient(${mc} ${lwMinor}px, transparent ${lwMinor}px),
+                   linear-gradient(90deg, ${mc} ${lwMinor}px, transparent ${lwMinor}px),
+                   linear-gradient(${majorColor} ${lwMajor}px, transparent ${lwMajor}px),
+                   linear-gradient(90deg, ${majorColor} ${lwMajor}px, transparent ${lwMajor}px)`,
+                backgroundSize: `${sMinor}px ${sMinor}px, ${sMinor}px ${sMinor}px, ${sMajor}px ${sMajor}px, ${sMajor}px ${sMajor}px`,
+                backgroundPosition: `${pos}, ${pos}, ${pos}, ${pos}`
+              }}
+            />
+          );
+        })()}
+
         <div
           style={{
             transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
@@ -1346,31 +1375,6 @@ export default function App() {
             pointerEvents: 'none'
           }}
         >
-          {/* Background Grid：细网格线 + 每 5 格一条加粗主线。
-              线宽按缩放补偿：缩小时屏幕上始终 ≥1px 可见，放大时等比加粗；
-              缩得过小时细网格自动隐藏，只保留主线，避免糊成一片 */}
-          {(() => {
-            const z = viewport.zoom || 1;
-            const lwMinor = Math.max(1, 1 / z);      // 细线宽（画布像素）≈ 屏幕 1px
-            const lwMajor = Math.max(1.4, 1.6 / z);  // 主线更粗，放大时随画布加粗
-            const showMinor = z * 28 >= 13;          // 细格屏幕间距 <13px 时隐藏
-            const minorColor = canvasTheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.065)';
-            const majorColor = canvasTheme === 'dark' ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.14)';
-            const mc = showMinor ? minorColor : 'transparent';
-            return (
-              <div
-                className="absolute -top-[10000px] -left-[10000px] w-[20000px] h-[20000px]"
-                style={{
-                  backgroundImage: `linear-gradient(${mc} ${lwMinor}px, transparent ${lwMinor}px),
-                     linear-gradient(90deg, ${mc} ${lwMinor}px, transparent ${lwMinor}px),
-                     linear-gradient(${majorColor} ${lwMajor}px, transparent ${lwMajor}px),
-                     linear-gradient(90deg, ${majorColor} ${lwMajor}px, transparent ${lwMajor}px)`,
-                  backgroundSize: '28px 28px, 28px 28px, 140px 140px, 140px 140px'
-                }}
-              />
-            );
-          })()}
-
           {/* SVG Layer for Connections */}
           <svg className="absolute top-0 left-0 w-full h-full overflow-visible pointer-events-none z-0">
             <ConnectionsLayer

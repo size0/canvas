@@ -56,20 +56,42 @@ function authHeaders(apiKey) {
 async function pollTask(pollUrl, apiKey, { timeoutMs = 600000 } = {}) {
     const start = Date.now();
     let interval = 3000;
+    // 中转站偶发返回 403/permission_denied 或 5xx（限流/网关抖动），任务在上游其实仍在跑。
+    // 单次轮询失败不能直接判死刑，连续多次失败才视为真失败，
+    // 否则会出现「任务实际生成成功、前端却报权限错误」。
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 6;
 
     while (true) {
         if (Date.now() - start > timeoutMs) {
             throw new Error('gpt2api 任务超时');
         }
 
-        const res = await fetch(pollUrl, { headers: authHeaders(apiKey) });
-        const retryHeader = parseInt(res.headers.get('Retry-After') || '', 10);
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-            throw new Error(data?.error?.message || data?.error || `轮询失败 (HTTP ${res.status})`);
+        let res, data;
+        try {
+            res = await fetch(pollUrl, { headers: authHeaders(apiKey) });
+            data = await res.json().catch(() => ({}));
+        } catch (e) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                throw new Error(`轮询请求连续失败：${e.message || e}`);
+            }
+            await sleep(4000);
+            continue;
         }
 
+        if (!res.ok) {
+            consecutiveErrors++;
+            console.warn(`[gpt2api] 轮询返回 HTTP ${res.status}（第 ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS} 次），稍后重试:`, data?.error?.message || data?.error || '');
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                throw new Error(data?.error?.message || data?.error || `轮询失败 (HTTP ${res.status})`);
+            }
+            await sleep(4000);
+            continue;
+        }
+        consecutiveErrors = 0;
+
+        const retryHeader = parseInt(res.headers.get('Retry-After') || '', 10);
         const status = data.status;
         if (status === 'succeeded') {
             const item = data?.result?.data?.[0];
@@ -88,10 +110,19 @@ async function pollTask(pollUrl, apiKey, { timeoutMs = 600000 } = {}) {
     }
 }
 
-async function downloadToBuffer(url) {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`下载生成结果失败 (HTTP ${resp.status})`);
-    return Buffer.from(await resp.arrayBuffer());
+async function downloadToBuffer(url, { retries = 3 } = {}) {
+    let lastErr;
+    for (let i = 0; i <= retries; i++) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`下载生成结果失败 (HTTP ${resp.status})`);
+            return Buffer.from(await resp.arrayBuffer());
+        } catch (e) {
+            lastErr = e;
+            if (i < retries) await sleep(2000 * (i + 1));
+        }
+    }
+    throw lastErr;
 }
 
 /** 尝试从一次性（同步）响应里直接取出结果项；取不到返回 null */
@@ -180,7 +211,16 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
         if (!taskId) throw new Error('视频接口未返回结果或 task_id');
         item = await pollTask(`${base}/video/generations/${taskId}`, apiKey, { timeoutMs: 900000 });
     }
-    return await downloadToBuffer(item.url);
+    try {
+        return await downloadToBuffer(item.url);
+    } catch (e) {
+        // grok-imagine-video 的结果存放在 assets.grok.com，有防盗链（直接下载 403）。
+        // 视频实际已生成并计费，但拿不到文件——提示用户换可下载的模型。
+        if (String(item.url).includes('assets.grok.com')) {
+            throw new Error('视频已生成，但 Grok 官方资产服务器拒绝下载（防盗链限制）。请在节点或「设置」中把视频模型换成 veo3.1-lite / veo3.1 / sora 后重试');
+        }
+        throw e;
+    }
 }
 
 /**
