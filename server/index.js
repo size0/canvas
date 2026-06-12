@@ -31,8 +31,9 @@ const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
 const CHATS_DIR = path.join(LIBRARY_DIR, 'chats');
 const LIBRARY_ASSETS_DIR = path.join(LIBRARY_DIR, 'assets');
+const EDIT_PROJECTS_DIR = path.join(LIBRARY_DIR, 'edit-projects');
 
-[LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR].forEach(dir => {
+[LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR, EDIT_PROJECTS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -1066,6 +1067,86 @@ app.post('/api/assets/:type/clean', async (req, res) => {
         res.json({ success: true, deleted });
     } catch (error) {
         console.error('Clean assets error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================================
+// 剪辑项目：保存/加载视频剪辑工作区状态（时间轴、字幕、配音等）
+// ============================================================================
+
+const sanitizeProjectId = (id) => String(id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+
+// 列出全部剪辑项目（仅元信息，按更新时间倒序）
+app.get('/api/edit-projects', (req, res) => {
+    try {
+        const list = [];
+        for (const file of fs.readdirSync(EDIT_PROJECTS_DIR)) {
+            if (!file.endsWith('.json')) continue;
+            try {
+                const p = JSON.parse(fs.readFileSync(path.join(EDIT_PROJECTS_DIR, file), 'utf8'));
+                list.push({
+                    id: p.id,
+                    name: p.name,
+                    createdAt: p.createdAt,
+                    updatedAt: p.updatedAt,
+                    clipCount: Array.isArray(p.data?.clips) ? p.data.clips.length : 0,
+                });
+            } catch { /* 跳过损坏文件 */ }
+        }
+        list.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+        res.json({ projects: list });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 获取单个剪辑项目（含完整数据）
+app.get('/api/edit-projects/:id', (req, res) => {
+    try {
+        const id = sanitizeProjectId(req.params.id);
+        const file = path.join(EDIT_PROJECTS_DIR, `${id}.json`);
+        if (!fs.existsSync(file)) return res.status(404).json({ error: 'Project not found' });
+        res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 保存剪辑项目：传 id 则覆盖更新，不传则新建
+app.post('/api/edit-projects', (req, res) => {
+    try {
+        const { id, name, data } = req.body || {};
+        if (!data || typeof data !== 'object') {
+            return res.status(400).json({ error: 'Missing project data' });
+        }
+        const projectId = sanitizeProjectId(id) || `proj_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const file = path.join(EDIT_PROJECTS_DIR, `${projectId}.json`);
+        const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+        const now = new Date().toISOString();
+        const project = {
+            id: projectId,
+            name: String(name || existing?.name || '未命名剪辑').slice(0, 80),
+            createdAt: existing?.createdAt || now,
+            updatedAt: now,
+            data,
+        };
+        fs.writeFileSync(file, JSON.stringify(project));
+        res.json({ success: true, id: projectId, name: project.name, updatedAt: now });
+    } catch (error) {
+        console.error('Save edit project error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 删除剪辑项目
+app.delete('/api/edit-projects/:id', (req, res) => {
+    try {
+        const id = sanitizeProjectId(req.params.id);
+        const file = path.join(EDIT_PROJECTS_DIR, `${id}.json`);
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+        res.json({ success: true });
+    } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });

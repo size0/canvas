@@ -13,7 +13,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
     X, Play, Pause, Plus, Trash2, ChevronUp, ChevronDown, Scissors,
     Loader2, Download, Mic, Captions, Sparkles, Film, ArrowLeftRight, Check,
-    Undo2, Redo2, Maximize2, Minimize2
+    Undo2, Redo2, Maximize2, Minimize2, Save
 } from 'lucide-react';
 import { showAppConfirm } from '../ui/AppDialog';
 
@@ -119,6 +119,14 @@ interface Sticker {
 }
 
 interface VoiceOption { id: string; name: string; }
+
+/** 已保存剪辑项目的元信息（下拉历史列表用） */
+interface EditProjectMeta {
+    id: string;
+    name: string;
+    updatedAt?: string;
+    clipCount?: number;
+}
 
 interface VideoStudioPageProps {
     isOpen: boolean;
@@ -492,6 +500,13 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     const [exportUrl, setExportUrl] = useState<string | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+    // ---- 剪辑项目（保存当前剪辑状态 / 打开历史剪辑）----
+    const [projects, setProjects] = useState<EditProjectMeta[]>([]);
+    const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+    const [currentProjectName, setCurrentProjectName] = useState('');
+    const [savingProject, setSavingProject] = useState(false);
+    const [openingProject, setOpeningProject] = useState(false);
+
     // ---- refs ----
     const videoRef = useRef<HTMLVideoElement>(null);
     const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -576,7 +591,117 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             .then(r => r.json())
             .then(d => { if (d.voices) setVoices(d.voices); })
             .catch(() => { /* 用默认音色 */ });
+
+        refreshProjects();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
+
+    // ============================================================================
+    // 剪辑项目：保存 / 打开历史 / 删除
+    // ============================================================================
+
+    const refreshProjects = useCallback(async () => {
+        try {
+            const r = await fetch('/api/edit-projects');
+            if (r.ok) {
+                const d = await r.json();
+                setProjects(d.projects || []);
+            }
+        } catch { /* 列表加载失败不阻塞剪辑 */ }
+    }, []);
+
+    /** 保存当前剪辑工作区：已打开历史项目则覆盖，否则新建 */
+    const handleSaveProject = useCallback(async () => {
+        setSavingProject(true);
+        try {
+            const name = currentProjectName
+                || `剪辑 ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
+            const data = {
+                version: 1,
+                clips, transitions, subtitles, audios, stickers,
+                defaultStyle, resolution, voice, script,
+                videoTrackMuted, audioTrackMuted,
+            };
+            const r = await fetch('/api/edit-projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: currentProjectId || undefined, name, data }),
+            });
+            if (r.ok) {
+                const d = await r.json();
+                setCurrentProjectId(d.id);
+                setCurrentProjectName(d.name);
+                await refreshProjects();
+            } else {
+                setErrorMsg('保存剪辑失败');
+            }
+        } catch (e: any) {
+            setErrorMsg(`保存剪辑失败：${e.message}`);
+        } finally {
+            setSavingProject(false);
+        }
+    }, [currentProjectId, currentProjectName, clips, transitions, subtitles, audios, stickers,
+        defaultStyle, resolution, voice, script, videoTrackMuted, audioTrackMuted, refreshProjects]);
+
+    /** 打开历史剪辑项目，恢复全部时间轴状态 */
+    const handleOpenProject = useCallback(async (id: string) => {
+        if (!id || id === currentProjectId) return;
+        const hasContent = clips.length > 0 || subtitles.length > 0 || audios.length > 0 || stickers.length > 0;
+        if (hasContent) {
+            const ok = await showAppConfirm('打开历史剪辑会替换当前时间轴内容，未保存的修改将丢失。确定继续吗？', {
+                title: '打开历史剪辑', confirmText: '打开', danger: true,
+            });
+            if (!ok) return;
+        }
+        setOpeningProject(true);
+        try {
+            const r = await fetch(`/api/edit-projects/${id}`);
+            if (!r.ok) { setErrorMsg('加载剪辑失败'); return; }
+            const p = await r.json();
+            const d = p.data || {};
+            setClips(Array.isArray(d.clips) ? d.clips : []);
+            setTransitions(Array.isArray(d.transitions) ? d.transitions : []);
+            setSubtitles(Array.isArray(d.subtitles) ? d.subtitles : []);
+            setAudios(Array.isArray(d.audios) ? d.audios : []);
+            setStickers(Array.isArray(d.stickers) ? d.stickers : []);
+            if (d.defaultStyle) setDefaultStyle({ ...DEFAULT_SUB_STYLE, ...d.defaultStyle });
+            if (d.resolution) setResolution(d.resolution);
+            if (d.voice) setVoice(d.voice);
+            if (typeof d.script === 'string') setScript(d.script);
+            setVideoTrackMuted(!!d.videoTrackMuted);
+            setAudioTrackMuted(!!d.audioTrackMuted);
+            // 重置播放与撤销历史（避免跨项目撤销）
+            setSelected(null);
+            setPlayhead(0);
+            setPlaying(false);
+            setExportUrl(null);
+            setErrorMsg(null);
+            historyRef.current = [];
+            redoStackRef.current = [];
+            setHistVersion(v => v + 1);
+            setCurrentProjectId(p.id);
+            setCurrentProjectName(p.name || '');
+        } catch (e: any) {
+            setErrorMsg(`加载剪辑失败：${e.message}`);
+        } finally {
+            setOpeningProject(false);
+        }
+    }, [currentProjectId, clips.length, subtitles.length, audios.length, stickers.length]);
+
+    /** 删除当前打开的历史剪辑记录（不影响时间轴内容） */
+    const handleDeleteProject = useCallback(async () => {
+        if (!currentProjectId) return;
+        const ok = await showAppConfirm(`确定删除剪辑记录「${currentProjectName || currentProjectId}」吗？时间轴当前内容不受影响。`, {
+            title: '删除剪辑记录', confirmText: '删除', danger: true,
+        });
+        if (!ok) return;
+        try {
+            await fetch(`/api/edit-projects/${currentProjectId}`, { method: 'DELETE' });
+            setCurrentProjectId(null);
+            setCurrentProjectName('');
+            await refreshProjects();
+        } catch { /* 忽略 */ }
+    }, [currentProjectId, currentProjectName, refreshProjects]);
 
     // 跟踪预览视频显示尺寸（字幕字号/位置按比例渲染）
     useEffect(() => {
@@ -1860,6 +1985,40 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             <Download size={14} /> 下载成品（已存入历史）
                         </a>
                     )}
+                    {/* 历史剪辑下拉：选择即打开对应剪辑项目 */}
+                    <select
+                        value={currentProjectId ?? ''}
+                        onChange={e => handleOpenProject(e.target.value)}
+                        disabled={openingProject}
+                        className="bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-2 text-xs outline-none max-w-[200px] disabled:opacity-50"
+                        title="打开历史剪辑"
+                    >
+                        <option value="">{projects.length ? '历史剪辑…' : '暂无历史剪辑'}</option>
+                        {projects.map(p => (
+                            <option key={p.id} value={p.id}>
+                                {p.name}（{p.clipCount ?? 0} 段{p.updatedAt ? ` · ${new Date(p.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}）
+                            </option>
+                        ))}
+                    </select>
+                    {currentProjectId && (
+                        <button
+                            onClick={handleDeleteProject}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-red-400 hover:bg-neutral-800"
+                            title="删除当前剪辑记录"
+                        >
+                            <Trash2 size={14} />
+                        </button>
+                    )}
+                    {/* 保存当前剪辑状态 */}
+                    <button
+                        onClick={handleSaveProject}
+                        disabled={savingProject || (clips.length === 0 && subtitles.length === 0 && audios.length === 0 && stickers.length === 0)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={currentProjectId ? `保存到「${currentProjectName}」` : '保存为新剪辑项目'}
+                    >
+                        {savingProject ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        {currentProjectId ? '保存剪辑' : '保存为新剪辑'}
+                    </button>
                     <select
                         value={resolution}
                         onChange={e => setResolution(e.target.value)}
