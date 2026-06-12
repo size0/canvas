@@ -111,6 +111,15 @@ const aTrack = (a: AudioItem) => Math.max(0, a.track ?? 0);
 
 const MAX_AUDIO_LANES = 4;
 
+/** 画中画片段：在主视频上方叠加的小窗视频/图片（自由摆放时间与位置） */
+interface OverlayClip extends Clip {
+    start: number;  // 时间轴起点（秒，自由放置）
+    track: number;  // 画中画轨道（0 起）
+}
+
+const oTrack = (o: OverlayClip) => Math.max(0, o.track ?? 0);
+const MAX_OVERLAY_LANES = 2;
+
 /** 音频条目在时间轴上的有效时长（裁剪 + 变速后） */
 const audioDur = (a: AudioItem) => (a.outPoint - a.inPoint) / a.speed;
 
@@ -392,12 +401,29 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
     const [audios, setAudios] = useState<AudioItem[]>([]);
     const [stickers, setStickers] = useState<Sticker[]>([]);
+    const [overlays, setOverlays] = useState<OverlayClip[]>([]);
 
     // ---- 选中与播放 ----
-    const [selected, setSelected] = useState<{ kind: 'clip' | 'sub' | 'audio' | 'sticker'; id: string } | null>(null);
+    const [selected, setSelected] = useState<{ kind: 'clip' | 'sub' | 'audio' | 'sticker' | 'overlay'; id: string } | null>(null);
     const [playhead, setPlayhead] = useState(0);
     const [playing, setPlaying] = useState(false);
     const [pxPerSec, setPxPerSec] = useState(40);
+
+    // ---- 时间轴面板高度（顶边可拖动调节；轨道多时内部上下滚动）----
+    const [timelineH, setTimelineH] = useState(360);
+    const tlResizeRef = useRef<{ startY: number; startH: number } | null>(null);
+    const onTlResizeDown = (e: React.PointerEvent) => {
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        tlResizeRef.current = { startY: e.clientY, startH: timelineH };
+    };
+    const onTlResizeMove = (e: React.PointerEvent) => {
+        const d = tlResizeRef.current;
+        if (!d) return;
+        const max = Math.round(window.innerHeight * 0.7);
+        setTimelineH(Math.min(max, Math.max(160, d.startH + (d.startY - e.clientY))));
+    };
+    const onTlResizeUp = () => { tlResizeRef.current = null; };
 
     // ---- 轨道级静音 ----
     const [videoTrackMuted, setVideoTrackMuted] = useState(false);
@@ -420,6 +446,21 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         return Math.min(MAX_AUDIO_LANES - 1, audioLanes);
     }, [audios, audioLanes]);
 
+    // ---- 画中画轨道 ----
+    const [overlayLaneCount, setOverlayLaneCount] = useState(1);
+    const overlayLanes = useMemo(
+        () => Math.min(MAX_OVERLAY_LANES, Math.max(1, overlayLaneCount, ...overlays.map(o => oTrack(o) + 1))),
+        [overlayLaneCount, overlays]
+    );
+    /** 找一条在 [start, end) 没有画中画重叠的轨道，找不到返回第 0 轨 */
+    const findFreeOverlayLane = useCallback((start: number, end: number): number => {
+        for (let L = 0; L < overlayLanes; L++) {
+            const overlap = overlays.some(o => oTrack(o) === L && start < o.start + clipDur(o) && end > o.start);
+            if (!overlap) return L;
+        }
+        return overlayLanes < MAX_OVERLAY_LANES ? overlayLanes : 0;
+    }, [overlays, overlayLanes]);
+
     // ---- 撤销 / 重做（历史栈，覆盖 片段/转场/字幕/音频 四类数据）----
     interface HistorySnapshot {
         clips: Clip[];
@@ -427,6 +468,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         subtitles: SubtitleItem[];
         audios: AudioItem[];
         stickers: Sticker[];
+        overlays: OverlayClip[];
     }
     const historyRef = useRef<HistorySnapshot[]>([]);
     const redoStackRef = useRef<HistorySnapshot[]>([]);
@@ -438,7 +480,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         if (!isOpen) return;
         if (applyingHistoryRef.current) { applyingHistoryRef.current = false; return; }
         const t = setTimeout(() => {
-            const snap: HistorySnapshot = structuredClone({ clips, transitions, subtitles, audios, stickers });
+            const snap: HistorySnapshot = structuredClone({ clips, transitions, subtitles, audios, stickers, overlays });
             const top = historyRef.current[historyRef.current.length - 1];
             if (top && JSON.stringify(top) === JSON.stringify(snap)) return; // 无实际变化
             historyRef.current.push(snap);
@@ -447,7 +489,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             setHistVersion(v => v + 1);
         }, 400);
         return () => clearTimeout(t);
-    }, [isOpen, clips, transitions, subtitles, audios, stickers]);
+    }, [isOpen, clips, transitions, subtitles, audios, stickers, overlays]);
 
     const applySnapshot = (snap: HistorySnapshot) => {
         applyingHistoryRef.current = true;
@@ -457,6 +499,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         setSubtitles(s.subtitles);
         setAudios(s.audios);
         setStickers(s.stickers || []);
+        setOverlays(s.overlays || []);
         setSelected(null);
         currentClipIdxRef.current = -1;
         setHistVersion(v => v + 1);
@@ -486,7 +529,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     // 选中对象时自动切换到对应 Tab
     useEffect(() => {
         if (!selected) return;
-        if (selected.kind === 'clip') { if (panelTab !== 'fx' && panelTab !== 'trans') setPanelTab('video'); }
+        if (selected.kind === 'clip' || selected.kind === 'overlay') { if (panelTab !== 'fx' && panelTab !== 'trans') setPanelTab('video'); }
         else if (selected.kind === 'sub') setPanelTab('text');
         else if (selected.kind === 'sticker') setPanelTab('sticker');
         else setPanelTab('audio');
@@ -533,6 +576,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     // ---- refs ----
     const videoRef = useRef<HTMLVideoElement>(null);
     const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+    const overlayElsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
     const rafRef = useRef<number>(0);
     const lastTickRef = useRef(performance.now());
     const playheadRef = useRef(0);
@@ -586,8 +630,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         const audioEnd = audios.reduce((m, a) => Math.max(m, a.start + audioDur(a)), 0);
         const subEnd = subtitles.reduce((m, s) => Math.max(m, s.end), 0);
         const stkEnd = stickers.reduce((m, s) => Math.max(m, s.end), 0);
-        return Math.max(clipTotal, audioEnd, subEnd, stkEnd, 1);
-    }, [clips, audios, subtitles, stickers]);
+        const ovEnd = overlays.reduce((m, o) => Math.max(m, o.start + clipDur(o)), 0);
+        return Math.max(clipTotal, audioEnd, subEnd, stkEnd, ovEnd, 1);
+    }, [clips, audios, subtitles, stickers, overlays]);
 
     // ============================================================================
     // 数据加载
@@ -641,10 +686,11 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 || `剪辑 ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
             const data = {
                 version: 1,
-                clips, transitions, subtitles, audios, stickers,
+                clips, transitions, subtitles, audios, stickers, overlays,
                 defaultStyle, resolution, voice, script,
                 videoTrackMuted, audioTrackMuted,
                 audioLaneCount: audioLanes, audioLaneMuted,
+                overlayLaneCount: overlayLanes,
             };
             const r = await fetch('/api/edit-projects', {
                 method: 'POST',
@@ -664,9 +710,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         } finally {
             setSavingProject(false);
         }
-    }, [currentProjectId, currentProjectName, clips, transitions, subtitles, audios, stickers,
+    }, [currentProjectId, currentProjectName, clips, transitions, subtitles, audios, stickers, overlays,
         defaultStyle, resolution, voice, script, videoTrackMuted, audioTrackMuted,
-        audioLanes, audioLaneMuted, refreshProjects]);
+        audioLanes, audioLaneMuted, overlayLanes, refreshProjects]);
 
     /** 打开历史剪辑项目，恢复全部时间轴状态 */
     const handleOpenProject = useCallback(async (id: string) => {
@@ -689,6 +735,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             setSubtitles(Array.isArray(d.subtitles) ? d.subtitles : []);
             setAudios(Array.isArray(d.audios) ? d.audios : []);
             setStickers(Array.isArray(d.stickers) ? d.stickers : []);
+            setOverlays(Array.isArray(d.overlays) ? d.overlays : []);
+            setOverlayLaneCount(Math.min(MAX_OVERLAY_LANES, Math.max(1, Number(d.overlayLaneCount) || 1)));
             if (d.defaultStyle) setDefaultStyle({ ...DEFAULT_SUB_STYLE, ...d.defaultStyle });
             if (d.resolution) setResolution(d.resolution);
             if (d.voice) setVoice(d.voice);
@@ -908,6 +956,33 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             }
         });
 
+        // 画中画视频同步（拖动播放头时也对齐画面帧）
+        overlays.forEach(o => {
+            if (o.isImage) return;
+            const el = overlayElsRef.current.get(o.id);
+            if (!el) return;
+            const local = t - o.start;
+            const inRange = local >= 0 && local < clipDur(o);
+            const want = o.inPoint + Math.max(0, local) * o.speed;
+            if (playingRef.current && inRange) {
+                el.playbackRate = o.speed;
+                el.muted = o.muted || videoTrackMuted;
+                el.volume = Math.min(1, o.volume);
+                if (el.paused) {
+                    el.currentTime = want;
+                    el.play().catch(() => { });
+                } else if (Math.abs(el.currentTime - want) > 0.35) {
+                    el.currentTime = want;
+                }
+            } else {
+                if (!el.paused) el.pause();
+                // 暂停状态下拖播放头：对齐当前帧
+                if (!playingRef.current && inRange && Math.abs(el.currentTime - want) > 0.2) {
+                    el.currentTime = want;
+                }
+            }
+        });
+
         // 预览转场进度推进
         const tp = transPreviewRef.current;
         if (tp) {
@@ -921,7 +996,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         }
 
         rafRef.current = requestAnimationFrame(tick);
-    }, [clips, clipStarts, audios, syncVideoTo, audioTrackMuted, audioLaneMuted, startTransPreview]);
+    }, [clips, clipStarts, audios, overlays, syncVideoTo, audioTrackMuted, audioLaneMuted, videoTrackMuted, startTransPreview]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -1262,6 +1337,49 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         currentClipIdxRef.current = -1;
     };
 
+    /** 从素材库添加画中画：放到播放头处的空闲画中画轨，默认 40% 宽、右上角 */
+    const addOverlayFromLibrary = (v: LibraryAsset) => {
+        const t = playheadRef.current;
+        const make = (sourceDuration: number, outPoint: number, isImage: boolean) => {
+            const base = buildClip(v, sourceDuration, outPoint, isImage);
+            const item: OverlayClip = {
+                ...base,
+                scale: 0.4, posX: 0.28, posY: -0.26,
+                start: t,
+                track: findFreeOverlayLane(t, t + outPoint),
+            };
+            setOverlays(prev => [...prev, item]);
+            setSelected({ kind: 'overlay', id: item.id });
+        };
+        if (v.assetType === 'image') { make(600, 4, true); return; }
+        const probe = document.createElement('video');
+        probe.preload = 'metadata';
+        probe.src = v.url.startsWith('http') ? v.url : `${v.url}`;
+        probe.onloadedmetadata = () => {
+            const dur = isFinite(probe.duration) && probe.duration > 0 ? probe.duration : 5;
+            make(dur, dur, false);
+        };
+        probe.onerror = () => setErrorMsg('素材加载失败，无法添加画中画');
+    };
+
+    /** 把主轨视频片段转为画中画（保留裁剪/变速，从原全局时间点开始） */
+    const convertClipToOverlay = (clipId: string) => {
+        const idx = clips.findIndex(c => c.id === clipId);
+        if (idx < 0) return;
+        const c = clips[idx];
+        const start = clipStarts[idx];
+        const item: OverlayClip = {
+            ...structuredClone(c),
+            id: uid(),
+            scale: 0.4, posX: 0.28, posY: -0.26,
+            start,
+            track: findFreeOverlayLane(start, start + clipDur(c)),
+        };
+        removeClip(clipId);
+        setOverlays(prev => [...prev, item]);
+        setSelected({ kind: 'overlay', id: item.id });
+    };
+
     /** 分离音频：把视频片段的原声提取为独立音频条目（放到空闲音轨），片段本身静音 */
     const detachAudioFromClip = (clipId: string) => {
         const idx = clips.findIndex(c => c.id === clipId);
@@ -1373,6 +1491,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         audios.forEach(a => all.add(`audio:${a.id}`));
         subtitles.forEach(s => all.add(`sub:${s.id}`));
         stickers.forEach(s => all.add(`sticker:${s.id}`));
+        overlays.forEach(o => all.add(`overlay:${o.id}`));
         setMultiSel(all);
     };
 
@@ -1381,8 +1500,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         const sel = new Set<string>();
         const xs = x, xe = x + w, ys = y, ye = y + h;
         const hitRow = (top: number, bottom: number) => ye > top && ys < bottom;
-        const audioTop = 80;                              // 标尺 24 + 视频轨 56
-        const subTop = audioTop + audioLanes * 56 + 24;   // 音轨 N 条 + 「添加音轨」行
+        const overlayTop = 80;                                   // 标尺 24 + 视频轨 56
+        const audioTop = overlayTop + overlayLanes * 56;         // 画中画轨 N 条
+        const subTop = audioTop + audioLanes * 56 + 24;          // 音轨 N 条 + 「添加音轨」行
         const stickerTop = subTop + 56;
         if (hitRow(24, 80)) {
             let cx = 0;
@@ -1392,6 +1512,12 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 cx += cw;
             }
         }
+        overlays.forEach(o => {
+            const top = overlayTop + oTrack(o) * 56;
+            if (!hitRow(top, top + 56)) return;
+            const l = o.start * pxPerSec, iw = Math.max(clipDur(o) * pxPerSec, 24);
+            if (xe > l && xs < l + iw) sel.add(`overlay:${o.id}`);
+        });
         audios.forEach(a => {
             const top = audioTop + aTrack(a) * 56;
             if (!hitRow(top, top + 56)) return;
@@ -1421,19 +1547,21 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         setAudios(prev => prev.filter(a => !has('audio', a.id)));
         setSubtitles(prev => prev.filter(s => !has('sub', s.id)));
         setStickers(prev => prev.filter(s => !has('sticker', s.id)));
+        setOverlays(prev => prev.filter(o => !has('overlay', o.id)));
         if (selected && multiSel.has(`${selected.kind}:${selected.id}`)) setSelected(null);
         setMultiSel(new Set());
         currentClipIdxRef.current = -1;
     };
 
-    // ---- 拖拽（配音/字幕/贴纸块水平移动；音频块可上下拖动换轨；多选时整组移动）----
+    // ---- 拖拽（配音/字幕/贴纸/画中画块水平移动；音频/画中画块可上下拖动换轨；多选时整组移动）----
+    type DragKind = 'sub' | 'audio' | 'sticker' | 'overlay';
     const dragRef = useRef<{
-        kind: 'sub' | 'audio' | 'sticker'; id: string; startX: number; orig: number;
+        kind: DragKind; id: string; startX: number; orig: number;
         startY?: number; origTrack?: number;
-        group?: { kind: 'sub' | 'audio' | 'sticker'; id: string; orig: number }[];
+        group?: { kind: DragKind; id: string; orig: number }[];
     } | null>(null);
 
-    const onItemPointerDown = (e: React.PointerEvent, kind: 'sub' | 'audio' | 'sticker', id: string, origStart: number) => {
+    const onItemPointerDown = (e: React.PointerEvent, kind: DragKind, id: string, origStart: number) => {
         e.stopPropagation();
         const key = `${kind}:${id}`;
         // Ctrl+点击：切换该项的多选状态，不进入拖动
@@ -1446,13 +1574,14 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             return;
         }
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
-        // 拖动多选成员 → 整组移动（仅时间可移的三类轨道；视频片段是顺序排列不参与）
-        let group: { kind: 'sub' | 'audio' | 'sticker'; id: string; orig: number }[] | undefined;
+        // 拖动多选成员 → 整组移动（仅时间可移的轨道；视频片段是顺序排列不参与）
+        let group: { kind: DragKind; id: string; orig: number }[] | undefined;
         if (multiSel.has(key) && multiSel.size > 1) {
             group = [
                 ...audios.filter(a => multiSel.has(`audio:${a.id}`)).map(a => ({ kind: 'audio' as const, id: a.id, orig: a.start })),
                 ...subtitles.filter(s => multiSel.has(`sub:${s.id}`)).map(s => ({ kind: 'sub' as const, id: s.id, orig: s.start })),
                 ...stickers.filter(s => multiSel.has(`sticker:${s.id}`)).map(s => ({ kind: 'sticker' as const, id: s.id, orig: s.start })),
+                ...overlays.filter(o => multiSel.has(`overlay:${o.id}`)).map(o => ({ kind: 'overlay' as const, id: o.id, orig: o.start })),
             ];
         } else if (!multiSel.has(key) && multiSel.size > 0) {
             setMultiSel(new Set()); // 点击未选中的项 → 退出多选
@@ -1460,7 +1589,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         dragRef.current = {
             kind, id, startX: e.clientX, orig: origStart, group,
             startY: e.clientY,
-            origTrack: kind === 'audio' ? aTrack(audios.find(a => a.id === id) || ({} as AudioItem)) : 0,
+            origTrack:
+                kind === 'audio' ? aTrack(audios.find(a => a.id === id) || ({} as AudioItem))
+                    : kind === 'overlay' ? oTrack(overlays.find(o => o.id === id) || ({} as OverlayClip))
+                        : 0,
         };
         setSelected({ kind, id });
     };
@@ -1477,6 +1609,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             setAudios(prev => prev.map(a => { const g = find('audio', a.id); return g ? { ...a, start: g.orig + del } : a; }));
             setSubtitles(prev => prev.map(s => { const g = find('sub', s.id); return g ? { ...s, start: g.orig + del, end: g.orig + del + (s.end - s.start) } : s; }));
             setStickers(prev => prev.map(s => { const g = find('sticker', s.id); return g ? { ...s, start: g.orig + del, end: g.orig + del + (s.end - s.start) } : s; }));
+            setOverlays(prev => prev.map(o => { const g = find('overlay', o.id); return g ? { ...o, start: g.orig + del } : o; }));
             return;
         }
         const newStart = Math.max(0, d.orig + delta);
@@ -1485,6 +1618,10 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             const laneDelta = Math.round((e.clientY - (d.startY ?? e.clientY)) / 56);
             const newTrack = Math.min(audioLanes - 1, Math.max(0, (d.origTrack ?? 0) + laneDelta));
             setAudios(prev => prev.map(a => a.id === d.id ? { ...a, start: newStart, track: newTrack } : a));
+        } else if (d.kind === 'overlay') {
+            const laneDelta = Math.round((e.clientY - (d.startY ?? e.clientY)) / 56);
+            const newTrack = Math.min(overlayLanes - 1, Math.max(0, (d.origTrack ?? 0) + laneDelta));
+            setOverlays(prev => prev.map(o => o.id === d.id ? { ...o, start: newStart, track: newTrack } : o));
         } else if (d.kind === 'sticker') {
             setStickers(prev => prev.map(s => s.id === d.id ? { ...s, start: newStart, end: newStart + (s.end - s.start) } : s));
         } else {
@@ -1548,6 +1685,35 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     };
 
     const onAudioTrimUp = () => { audioTrimRef.current = null; };
+
+    // ---- 画中画块边缘拖拽（裁剪入点/出点）----
+    const overlayTrimRef = useRef<{ id: string; edge: 'L' | 'R'; startX: number; origStart: number; origIn: number; origOut: number } | null>(null);
+
+    const onOverlayTrimDown = (e: React.PointerEvent, o: OverlayClip, edge: 'L' | 'R') => {
+        e.stopPropagation();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        overlayTrimRef.current = { id: o.id, edge, startX: e.clientX, origStart: o.start, origIn: o.inPoint, origOut: o.outPoint };
+        setSelected({ kind: 'overlay', id: o.id });
+    };
+
+    const onOverlayTrimMove = (e: React.PointerEvent) => {
+        const d = overlayTrimRef.current;
+        if (!d) return;
+        const o = overlays.find(x => x.id === d.id);
+        if (!o) return;
+        const dSrc = ((e.clientX - d.startX) / pxPerSec) * o.speed; // 素材秒
+        if (d.edge === 'L') {
+            const newIn = Math.min(Math.max(0, d.origIn + dSrc), d.origOut - 0.2);
+            const actualDelta = (newIn - d.origIn) / o.speed;
+            setOverlays(prev => prev.map(x => x.id === d.id ? { ...x, inPoint: newIn, start: Math.max(0, d.origStart + actualDelta) } : x));
+        } else {
+            const maxOut = o.isImage ? 600 : o.sourceDuration;
+            const newOut = Math.max(Math.min(maxOut, d.origOut + dSrc), d.origIn + 0.2);
+            setOverlays(prev => prev.map(x => x.id === d.id ? { ...x, outPoint: newOut } : x));
+        }
+    };
+
+    const onOverlayTrimUp = () => { overlayTrimRef.current = null; };
 
     // ---- 时间轴空白区域：标尺区点击/拖动刷播放头；轨道空白区点击定位、按住拖动 = 框选 ----
     const scrubbingRef = useRef(false);
@@ -1701,8 +1867,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     };
 
     // ---- 复制 / 剪切 / 粘贴 / 删除 + 右键菜单 ----
-    type ItemKind = 'clip' | 'sub' | 'audio' | 'sticker';
-    const clipboardRef = useRef<{ kind: ItemKind; data: Clip | SubtitleItem | AudioItem | Sticker } | null>(null);
+    type ItemKind = 'clip' | 'sub' | 'audio' | 'sticker' | 'overlay';
+    const clipboardRef = useRef<{ kind: ItemKind; data: Clip | SubtitleItem | AudioItem | Sticker | OverlayClip } | null>(null);
     const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: { kind: ItemKind; id: string } | 'empty' } | null>(null);
     const [clipboardVersion, setClipboardVersion] = useState(0); // 刷新右键菜单"粘贴"可用态
     void clipboardVersion;
@@ -1711,6 +1877,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
         if (kind === 'clip') removeClip(id);
         else if (kind === 'sub') setSubtitles(p => p.filter(s => s.id !== id));
         else if (kind === 'sticker') setStickers(p => p.filter(s => s.id !== id));
+        else if (kind === 'overlay') setOverlays(p => p.filter(o => o.id !== id));
         else setAudios(p => p.filter(a => a.id !== id));
         if (selected?.id === id) setSelected(null);
     };
@@ -1720,7 +1887,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             kind === 'clip' ? clips.find(c => c.id === id) :
                 kind === 'sub' ? subtitles.find(s => s.id === id) :
                     kind === 'sticker' ? stickers.find(s => s.id === id) :
-                        audios.find(a => a.id === id);
+                        kind === 'overlay' ? overlays.find(o => o.id === id) :
+                            audios.find(a => a.id === id);
         if (!src) return;
         clipboardRef.current = { kind, data: structuredClone(src) };
         setClipboardVersion(v => v + 1);
@@ -1753,6 +1921,11 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
             const copy: Sticker = { ...structuredClone(d), id: uid(), start: t, end: t + (d.end - d.start) };
             setStickers(prev => [...prev, copy]);
             setSelected({ kind: 'sticker', id: copy.id });
+        } else if (cb.kind === 'overlay') {
+            const d = cb.data as OverlayClip;
+            const copy: OverlayClip = { ...structuredClone(d), id: uid(), start: t };
+            setOverlays(prev => [...prev, copy]);
+            setSelected({ kind: 'overlay', id: copy.id });
         } else {
             const d = cb.data as AudioItem;
             const copy: AudioItem = { ...structuredClone(d), id: uid(), start: t };
@@ -1859,6 +2032,28 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     };
 
     const onStickerPointerUp = () => { stickerDragRef.current = null; };
+
+    // 预览画面上拖拽画中画（posX/posY 为 -1~1 的画面比例偏移）
+    const overlayDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+    const onOverlayPointerDown = (e: React.PointerEvent, o: OverlayClip) => {
+        e.stopPropagation();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        overlayDragRef.current = { id: o.id, startX: e.clientX, startY: e.clientY, origX: o.posX, origY: o.posY };
+        setSelected({ kind: 'overlay', id: o.id });
+    };
+
+    const onOverlayPointerMove = (e: React.PointerEvent) => {
+        const d = overlayDragRef.current;
+        const wrap = videoWrapRef.current;
+        if (!d || !wrap) return;
+        const rect = wrap.getBoundingClientRect();
+        const nx = Math.min(1, Math.max(-1, d.origX + (e.clientX - d.startX) / rect.width));
+        const ny = Math.min(1, Math.max(-1, d.origY + (e.clientY - d.startY) / rect.height));
+        setOverlays(prev => prev.map(o => o.id === d.id ? { ...o, posX: nx, posY: ny } : o));
+    };
+
+    const onOverlayPointerUp = () => { overlayDragRef.current = null; };
 
     // ---- 预览画面上拖拽字幕（剪映式自由定位）----
     const previewDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -2038,6 +2233,11 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                         data: renderEmojiToPng(s.emoji),
                         x: s.x, y: s.y, size: s.size, start: s.start, end: s.end,
                     })),
+                    overlays: [...overlays].sort((a, b) => oTrack(a) - oTrack(b)).map(o => ({
+                        url: o.url, start: o.start, inPoint: o.inPoint, outPoint: o.outPoint,
+                        speed: o.speed, muted: o.muted || videoTrackMuted, volume: o.volume,
+                        scale: o.scale, posX: o.posX, posY: o.posY, isImage: !!o.isImage,
+                    })),
                     videoTrackMuted,
                     audioTrackMuted,
                     width: r.w, height: r.h, fps: 30,
@@ -2065,6 +2265,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     const curClip = curClipIdx >= 0 ? clips[curClipIdx] : null;
     const curFx = curClip?.effect ? FX_PRESETS.find(f => f.id === curClip.effect) : null;
     const selClip = selected?.kind === 'clip' ? clips.find(c => c.id === selected.id) : null;
+    const selOverlay = selected?.kind === 'overlay' ? overlays.find(o => o.id === selected.id) : null;
+    const patchOverlay = (id: string, patch: Partial<OverlayClip>) =>
+        setOverlays(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
     const selSticker = selected?.kind === 'sticker' ? stickers.find(s => s.id === selected.id) : null;
     const selSub = selected?.kind === 'sub' ? subtitles.find(s => s.id === selected.id) : null;
     const selAudio = selected?.kind === 'audio' ? audios.find(a => a.id === selected.id) : null;
@@ -2285,6 +2488,13 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                 {!libSelectMode && (
                                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
                                         <Plus size={20} className="text-white" />
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); addOverlayFromLibrary(v); }}
+                                            className="absolute bottom-0.5 right-1 px-1.5 py-0.5 rounded text-[9px] bg-amber-600/80 hover:bg-amber-500 text-white"
+                                            title="添加为画中画（播放头处）"
+                                        >
+                                            ⧉ 画中画
+                                        </button>
                                     </div>
                                 )}
                                 {/* 多选模式：勾选框；普通模式：悬停删除按钮 */}
@@ -2388,6 +2598,45 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                 {curFx?.dark && (
                                     <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.6) 100%)' }} />
                                 )}
+                                {/* 画中画叠加（视频元素常驻保持缓冲，按时间段显示；可拖拽调位置） */}
+                                {[...overlays].sort((a, b) => oTrack(a) - oTrack(b)).map(o => {
+                                    const inRange = playhead >= o.start && playhead < o.start + clipDur(o);
+                                    const isSel = selected?.kind === 'overlay' && selected.id === o.id;
+                                    return (
+                                        <div
+                                            key={o.id}
+                                            onPointerDown={e => { if (inRange) onOverlayPointerDown(e, o); }}
+                                            onPointerMove={onOverlayPointerMove}
+                                            onPointerUp={onOverlayPointerUp}
+                                            className={`absolute cursor-grab active:cursor-grabbing ${isSel ? 'ring-2 ring-cyan-400/90 rounded-sm' : ''}`}
+                                            style={{
+                                                left: `${(0.5 + o.posX) * 100}%`,
+                                                top: `${(0.5 + o.posY) * 100}%`,
+                                                transform: 'translate(-50%, -50%)',
+                                                width: `${Math.min(1.5, Math.max(0.1, o.scale)) * 100}%`,
+                                                display: inRange ? 'block' : 'none',
+                                                zIndex: 5 + oTrack(o),
+                                            }}
+                                            title={`画中画：${o.name}（拖拽调整位置）`}
+                                        >
+                                            {o.isImage ? (
+                                                <img
+                                                    src={o.url.startsWith('http') ? o.url : `${o.url}`}
+                                                    className="block w-full pointer-events-none"
+                                                    draggable={false}
+                                                />
+                                            ) : (
+                                                <video
+                                                    ref={el => { if (el) overlayElsRef.current.set(o.id, el); else overlayElsRef.current.delete(o.id); }}
+                                                    src={o.url.startsWith('http') ? o.url : `${o.url}`}
+                                                    className="block w-full pointer-events-none"
+                                                    playsInline
+                                                    preload="auto"
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })}
                                 {/* 贴纸叠加（可拖拽） */}
                                 {currentStickers.map(s => (
                                     <span
@@ -2530,9 +2779,82 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
 
                     <div className="flex-1 overflow-y-auto">
                     {/* ===== 视频 Tab ===== */}
-                    {panelTab === 'video' && !selClip && (
+                    {panelTab === 'video' && !selClip && !selOverlay && (
                         <div className="p-4 text-xs text-neutral-600 text-center leading-5">
                             选中时间轴上的视频片段后<br />可编辑：裁剪 / 变速 / 音量 / 旋转翻转<br />缩放位置 / 画面调节 / 倒放等
+                        </div>
+                    )}
+                    {/* ===== 画中画属性 ===== */}
+                    {panelTab === 'video' && selOverlay && (
+                        <div className="p-3 border-b border-neutral-800 space-y-2.5">
+                            <div className="text-xs font-bold text-amber-300 flex items-center justify-between">
+                                <span>⧉ 画中画属性</span>
+                                <button onClick={() => deleteItem('overlay', selOverlay.id)} className="text-red-400 hover:text-red-300" title="删除画中画"><Trash2 size={14} /></button>
+                            </div>
+                            <div className="text-[11px] text-neutral-500 truncate">{selOverlay.name}</div>
+                            <label className="block text-[11px] text-neutral-400">
+                                开始时间（秒）
+                                <input type="number" min={0} step={0.1} value={selOverlay.start.toFixed(1)}
+                                    onChange={e => patchOverlay(selOverlay.id, { start: Math.max(0, Number(e.target.value)) })}
+                                    className="mt-1 w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-xs outline-none focus:border-amber-500" />
+                            </label>
+                            <label className="block text-[11px] text-neutral-400">
+                                画面大小 {(Math.min(1.5, Math.max(0.1, selOverlay.scale)) * 100).toFixed(0)}%（占画面宽度）
+                                <input type="range" min={0.1} max={1.5} step={0.02} value={selOverlay.scale}
+                                    onChange={e => patchOverlay(selOverlay.id, { scale: Number(e.target.value) })}
+                                    className="mt-1 w-full" />
+                            </label>
+                            <div className="flex gap-2">
+                                <label className="flex-1 text-[11px] text-neutral-400">
+                                    水平位置
+                                    <input type="range" min={-0.6} max={0.6} step={0.01} value={selOverlay.posX}
+                                        onChange={e => patchOverlay(selOverlay.id, { posX: Number(e.target.value) })}
+                                        className="mt-1 w-full" />
+                                </label>
+                                <label className="flex-1 text-[11px] text-neutral-400">
+                                    垂直位置
+                                    <input type="range" min={-0.6} max={0.6} step={0.01} value={selOverlay.posY}
+                                        onChange={e => patchOverlay(selOverlay.id, { posY: Number(e.target.value) })}
+                                        className="mt-1 w-full" />
+                                </label>
+                            </div>
+                            <div className="text-[10px] text-neutral-600">在预览画面上可直接拖拽画中画调整位置</div>
+                            {!selOverlay.isImage && (
+                                <>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => patchOverlay(selOverlay.id, { muted: !selOverlay.muted })}
+                                            className={`text-[11px] px-2 py-1.5 rounded border ${selOverlay.muted ? 'bg-red-600/30 border-red-600 text-red-300' : 'bg-neutral-900 border-neutral-700 text-neutral-400'}`}>
+                                            {selOverlay.muted ? '🔇 已静音' : '🔊 原声'}
+                                        </button>
+                                        <input type="range" min={0} max={2} step={0.05} value={selOverlay.volume} disabled={selOverlay.muted}
+                                            onChange={e => patchOverlay(selOverlay.id, { volume: Number(e.target.value) })}
+                                            className="flex-1 disabled:opacity-40" />
+                                        <span className="text-[10px] text-neutral-500 w-9 text-right">{Math.round(selOverlay.volume * 100)}%</span>
+                                    </div>
+                                    <label className="block text-[11px] text-neutral-400">
+                                        倍速 {selOverlay.speed.toFixed(2)}x（变速后 {clipDur(selOverlay).toFixed(1)}s）
+                                        <div className="flex gap-1 mt-1">
+                                            {[0.5, 1, 1.5, 2].map(sp => (
+                                                <button key={sp} onClick={() => patchOverlay(selOverlay.id, { speed: sp })}
+                                                    className={`flex-1 text-[10px] py-0.5 rounded border ${selOverlay.speed === sp ? 'bg-amber-600/40 border-amber-500 text-amber-200' : 'bg-neutral-900 border-neutral-700 text-neutral-500 hover:border-neutral-500'}`}>
+                                                    {sp}x
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </label>
+                                </>
+                            )}
+                            <div className="flex gap-1">
+                                {Array.from({ length: overlayLanes }).map((_, L) => (
+                                    <button
+                                        key={L}
+                                        onClick={() => patchOverlay(selOverlay.id, { track: L })}
+                                        className={`flex-1 text-[10px] py-1 rounded border ${oTrack(selOverlay) === L ? 'bg-amber-600/40 border-amber-500 text-amber-200' : 'bg-neutral-900 border-neutral-700 text-neutral-500 hover:border-neutral-500'}`}
+                                    >
+                                        画中画轨{L + 1}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
                     {panelTab === 'video' && selClip && (
@@ -3111,11 +3433,19 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 </div>
             </div>
 
-            {/* ===== 底部时间轴 ===== */}
+            {/* ===== 底部时间轴（顶边拖动调高度，轨道多时内部上下滚动） ===== */}
             <div
-                className="relative border-t border-neutral-800 flex flex-shrink-0 bg-[#0e0e0e]"
-                style={{ height: 248 + audioLanes * 56 }}
+                className="relative border-t border-neutral-800 flex flex-col flex-shrink-0 bg-[#0e0e0e]"
+                style={{ height: timelineH }}
             >
+                {/* 高度拖动手柄 */}
+                <div
+                    onPointerDown={onTlResizeDown}
+                    onPointerMove={onTlResizeMove}
+                    onPointerUp={onTlResizeUp}
+                    className="absolute -top-1 inset-x-0 h-2 cursor-ns-resize z-[80] hover:bg-cyan-500/40 transition-colors"
+                    title="上下拖动调整时间轴高度"
+                />
                 {/* 多选浮动工具栏 */}
                 {multiSel.size > 0 && (
                     <div className="absolute -top-10 right-4 z-[60] flex items-center gap-2 px-3 py-1.5 bg-neutral-900/95 border border-neutral-700 rounded-full shadow-2xl text-[11px] backdrop-blur-sm">
@@ -3135,6 +3465,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                         </button>
                     </div>
                 )}
+                {/* 纵向滚动容器：轨道头与轨道内容一起上下滚动 */}
+                <div className="flex-1 flex min-h-0 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#404040 #0e0e0e' }}>
                 {/* 轨道头（固定列，与各轨行高对齐） */}
                 <div className="w-16 flex-shrink-0 border-r border-neutral-800 bg-[#121212] flex flex-col select-none">
                     <div className="h-6 border-b border-neutral-800 flex-shrink-0" />
@@ -3148,6 +3480,35 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             {videoTrackMuted ? '🔇' : '🔊'}
                         </button>
                     </div>
+                    {Array.from({ length: overlayLanes }).map((_, L) => {
+                        const laneEmpty = !overlays.some(o => oTrack(o) === L);
+                        const isLast = L === overlayLanes - 1;
+                        return (
+                            <div key={`ovh${L}`} className="h-14 flex flex-col items-center justify-center gap-0.5 border-b border-neutral-900">
+                                <span className="text-[10px] text-amber-400/80 font-medium">画中画{overlayLanes > 1 ? L + 1 : ''}</span>
+                                <div className="flex items-center gap-0.5">
+                                    {isLast && overlayLanes < MAX_OVERLAY_LANES && (
+                                        <button
+                                            onClick={() => setOverlayLaneCount(overlayLanes + 1)}
+                                            className="px-1 rounded text-[10px] bg-neutral-800 text-neutral-600 hover:text-cyan-300"
+                                            title="添加一条画中画轨"
+                                        >
+                                            ＋
+                                        </button>
+                                    )}
+                                    {isLast && laneEmpty && overlayLanes > 1 && (
+                                        <button
+                                            onClick={() => setOverlayLaneCount(overlayLanes - 1)}
+                                            className="px-1 rounded text-[10px] bg-neutral-800 text-neutral-600 hover:text-red-400"
+                                            title="删除这条空画中画轨"
+                                        >
+                                            ×
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
                     {Array.from({ length: audioLanes }).map((_, L) => {
                         const laneEmpty = !audios.some(a => aTrack(a) === L);
                         const isLast = L === audioLanes - 1;
@@ -3200,8 +3561,8 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 {/* 滚动区 */}
                 <div ref={timelineScrollRef} className="flex-1 overflow-x-auto overflow-y-hidden">
                     <div
-                        className="relative h-full cursor-pointer"
-                        style={{ width: timelineWidth }}
+                        className="relative cursor-pointer"
+                        style={{ width: timelineWidth, minHeight: '100%' }}
                         onPointerDown={onTimelinePointerDown}
                         onPointerMove={onTimelinePointerMove}
                         onPointerUp={onTimelinePointerUp}
@@ -3338,6 +3699,51 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                             </div>
                         </div>
 
+                        {/* 画中画轨（自由放置，可上下拖动换轨、拖边缘裁剪） */}
+                        {Array.from({ length: overlayLanes }).map((_, L) => (
+                        <div key={`ovlane${L}`} className="h-14 relative border-b border-neutral-900">
+                            {overlays.filter(o => oTrack(o) === L).map(o => {
+                                const isSel = (selected?.kind === 'overlay' && selected.id === o.id) || multiSel.has(`overlay:${o.id}`);
+                                return (
+                                    <div
+                                        key={o.id}
+                                        onPointerDown={e => onItemPointerDown(e, 'overlay', o.id, o.start)}
+                                        onPointerMove={onItemPointerMove}
+                                        onPointerUp={onItemPointerUp}
+                                        onContextMenu={e => openCtxMenu(e, { kind: 'overlay', id: o.id })}
+                                        className={`absolute top-1 h-12 rounded-md cursor-grab active:cursor-grabbing border-2 px-1.5 overflow-hidden ${isSel ? 'border-amber-400' : 'border-amber-900/80 hover:border-amber-600'}`}
+                                        style={{
+                                            left: o.start * pxPerSec,
+                                            width: Math.max(clipDur(o) * pxPerSec, 24),
+                                            background: 'linear-gradient(135deg, #33270e, #201807)',
+                                        }}
+                                        title={`画中画：${o.name}（${clipDur(o).toFixed(1)}s）拖动移动 / 上下换轨 / 拖边缘裁剪`}
+                                    >
+                                        <div className="h-full flex items-center gap-1 text-[10px] text-amber-200 truncate pointer-events-none">
+                                            ⧉ {o.name}
+                                            {o.speed !== 1 && <span className="px-0.5 rounded bg-black/40">{o.speed}x</span>}
+                                            {(o.muted || videoTrackMuted) && ' 🔇'}
+                                        </div>
+                                        <div
+                                            onPointerDown={e => onOverlayTrimDown(e, o, 'L')}
+                                            onPointerMove={onOverlayTrimMove}
+                                            onPointerUp={onOverlayTrimUp}
+                                            className={`absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize ${isSel ? 'bg-amber-400/80' : 'hover:bg-amber-500/60'}`}
+                                            title="拖动裁剪开头"
+                                        />
+                                        <div
+                                            onPointerDown={e => onOverlayTrimDown(e, o, 'R')}
+                                            onPointerMove={onOverlayTrimMove}
+                                            onPointerUp={onOverlayTrimUp}
+                                            className={`absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize ${isSel ? 'bg-amber-400/80' : 'hover:bg-amber-500/60'}`}
+                                            title="拖动裁剪结尾"
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        ))}
+
                         {/* 配音轨（多音轨：人声/背景声/BGM 分轨，音频块可上下拖动换轨） */}
                         {Array.from({ length: audioLanes }).map((_, L) => (
                         <div key={`lane${L}`} className="h-14 relative border-b border-neutral-900">
@@ -3462,6 +3868,7 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                         )}
                     </div>
                 </div>
+                </div>
             </div>
 
             {/* ===== 右键菜单 ===== */}
@@ -3520,6 +3927,13 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                             title="把片段原声提取为独立音频条目（片段本身静音）"
                                         >
                                             分离音频
+                                        </button>
+                                        <button
+                                            onClick={() => { convertClipToOverlay((ctxMenu.target as any).id); setCtxMenu(null); }}
+                                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-neutral-800 text-neutral-200"
+                                            title="把该片段从主轨移到画中画轨（保留裁剪/变速）"
+                                        >
+                                            转为画中画
                                         </button>
                                     </>
                                 )}

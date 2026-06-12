@@ -687,6 +687,33 @@ router.post('/export', async (req, res) => {
             });
         }
 
+        // 解析画中画（叠加在主画面上的小窗视频/图片；按 track 升序，高轨道盖在上层）
+        const overlayInfos = [];
+        const rawOverlays = Array.isArray(req.body.overlays) ? req.body.overlays : [];
+        for (const o of rawOverlays) {
+            const file = resolveLibraryPath(o.url, LIBRARY_DIR);
+            if (!file) continue; // 画中画素材缺失不致命，跳过
+            const isImage = /\.(png|jpe?g|webp|bmp|gif)$/i.test(file);
+            const meta = isImage ? { duration: 1e9, hasAudio: false } : await probeMedia(file);
+            const inP = isImage ? 0 : Math.max(0, Number(o.inPoint) || 0);
+            const outP = isImage
+                ? Math.max(0.2, (Number(o.outPoint) || 4) - (Number(o.inPoint) || 0))
+                : Math.min(meta.duration || 1e9, Number(o.outPoint) || meta.duration);
+            if (outP - inP < 0.1) continue;
+            const speed = Math.min(4, Math.max(0.25, Number(o.speed) || 1));
+            overlayInfos.push({
+                file, inP, outP, isImage, hasAudio: meta.hasAudio,
+                speed,
+                dur: (outP - inP) / speed,
+                start: Math.max(0, Number(o.start) || 0),
+                muted: o.muted === true,
+                volume: o.volume != null ? Math.min(2, Math.max(0, Number(o.volume))) : 1,
+                scale: Math.min(1.5, Math.max(0.1, Number(o.scale) || 0.4)),
+                posX: Math.min(1, Math.max(-1, Number(o.posX) || 0)),
+                posY: Math.min(1, Math.max(-1, Number(o.posY) || 0)),
+            });
+        }
+
         // 解析贴纸（前端已渲染为 PNG dataURL）
         const stickerInfos = [];
         const rawStickers = Array.isArray(req.body.stickers) ? req.body.stickers : [];
@@ -718,6 +745,14 @@ router.post('/export', async (req, res) => {
         audioInfos.forEach(ai => { inputs.push('-i', ai.file); });
         const stickerInputBase = n + audioInfos.length;
         stickerInfos.forEach(si => { inputs.push('-i', si.file); });
+        const overlayInputBase = stickerInputBase + stickerInfos.length;
+        overlayInfos.forEach(oi => {
+            if (oi.isImage) {
+                inputs.push('-loop', '1', '-t', (oi.dur + 1).toFixed(3), '-i', oi.file);
+            } else {
+                inputs.push('-i', oi.file);
+            }
+        });
 
         // ---------- 构建 filtergraph ----------
         const F = [];
@@ -836,6 +871,31 @@ router.post('/export', async (req, res) => {
             chainLen = chainLen + clipInfos[k].dur - td;
         }
 
+        // 画中画叠加（位于字幕/贴纸之下）：裁剪 → 变速 → 缩放 → 时间平移 → overlay 按时段启用
+        overlayInfos.forEach((oi, k) => {
+            const idx = overlayInputBase + k;
+            const parts = [];
+            if (oi.isImage) {
+                parts.push(`trim=0:${oi.dur.toFixed(3)}`, 'setpts=PTS-STARTPTS');
+            } else {
+                parts.push(`trim=start=${oi.inP.toFixed(3)}:end=${oi.outP.toFixed(3)}`, 'setpts=PTS-STARTPTS');
+                if (oi.speed !== 1) parts.push(`setpts=PTS/${oi.speed.toFixed(4)}`);
+            }
+            parts.push(
+                `scale=trunc(${width}*${oi.scale.toFixed(4)}/2)*2:-2`,
+                `fps=${fps}`,
+                `setpts=PTS+${oi.start.toFixed(3)}/TB`
+            );
+            F.push(`[${idx}:v]${parts.join(',')}[ovv${k}]`);
+            const ox = Math.round(oi.posX * width);
+            const oy = Math.round(oi.posY * height);
+            F.push(
+                `[${vLabel}][ovv${k}]overlay=x=(W-w)/2+${ox}:y=(H-h)/2+${oy}:` +
+                `enable='between(t,${oi.start.toFixed(3)},${(oi.start + oi.dur).toFixed(3)})':eof_action=pass[vov${k}]`
+            );
+            vLabel = `vov${k}`;
+        });
+
         // 字幕烧录（drawtext + textfile，避免转义问题）
         // 每条字幕可携带独立 style（剪映式逐条样式）；s.style 优先于全局 subtitleStyle
         // 按最大宽度自动断行：CJK 字符宽≈字号、半角≈0.55 字号，逐字累计宽度插入换行
@@ -939,28 +999,47 @@ router.post('/export', async (req, res) => {
             vLabel = `vstk${k}`;
         });
 
-        // 配音/音乐混音（变速 → 淡入淡出 → 音量 → 延迟到位）
+        // 配音/音乐/画中画原声混音（变速 → 淡入淡出 → 音量 → 延迟到位）
+        const mixLabels = [];
+
+        // 画中画原声
+        overlayInfos.forEach((oi, k) => {
+            if (oi.isImage || !oi.hasAudio || oi.muted || oi.volume === 0) return;
+            const idx = overlayInputBase + k;
+            const delayMs = Math.round(oi.start * 1000);
+            const parts = [
+                `atrim=start=${oi.inP.toFixed(3)}:end=${oi.outP.toFixed(3)}`,
+                'asetpts=PTS-STARTPTS',
+                'aformat=sample_rates=44100:channel_layouts=stereo',
+            ];
+            parts.push(...buildAtempoChain(oi.speed));
+            if (oi.volume !== 1) parts.push(`volume=${oi.volume.toFixed(2)}`);
+            parts.push(`adelay=${delayMs}|${delayMs}`);
+            F.push(`[${idx}:a]${parts.join(',')}[ova${k}]`);
+            mixLabels.push(`[ova${k}]`);
+        });
+
         const activeAudios = audioTrackMuted ? [] : audioInfos.filter(ai => ai.volume > 0);
-        if (activeAudios.length > 0) {
-            const ttsLabels = [];
-            activeAudios.forEach((ai, j) => {
-                const inputIdx = n + audioInfos.indexOf(ai);
-                const delayMs = Math.round(ai.start * 1000);
-                const effDur = (ai.outP - ai.inP) > 0 ? (ai.outP - ai.inP) / ai.speed : 0;
-                const parts = [
-                    `atrim=start=${ai.inP.toFixed(3)}:end=${ai.outP.toFixed(3)}`,
-                    'asetpts=PTS-STARTPTS',
-                    'aformat=sample_rates=44100:channel_layouts=stereo',
-                ];
-                parts.push(...buildAtempoChain(ai.speed));
-                if (ai.fadeIn > 0) parts.push(`afade=t=in:st=0:d=${ai.fadeIn.toFixed(2)}`);
-                if (ai.fadeOut > 0 && effDur > ai.fadeOut) parts.push(`afade=t=out:st=${(effDur - ai.fadeOut).toFixed(2)}:d=${ai.fadeOut.toFixed(2)}`);
-                if (ai.volume !== 1) parts.push(`volume=${ai.volume.toFixed(2)}`);
-                parts.push(`adelay=${delayMs}|${delayMs}`);
-                F.push(`[${inputIdx}:a]${parts.join(',')}[tts${j}]`);
-                ttsLabels.push(`[tts${j}]`);
-            });
-            F.push(`[${aLabel}]${ttsLabels.join('')}amix=inputs=${1 + ttsLabels.length}:duration=first:normalize=0[aout]`);
+        activeAudios.forEach((ai, j) => {
+            const inputIdx = n + audioInfos.indexOf(ai);
+            const delayMs = Math.round(ai.start * 1000);
+            const effDur = (ai.outP - ai.inP) > 0 ? (ai.outP - ai.inP) / ai.speed : 0;
+            const parts = [
+                `atrim=start=${ai.inP.toFixed(3)}:end=${ai.outP.toFixed(3)}`,
+                'asetpts=PTS-STARTPTS',
+                'aformat=sample_rates=44100:channel_layouts=stereo',
+            ];
+            parts.push(...buildAtempoChain(ai.speed));
+            if (ai.fadeIn > 0) parts.push(`afade=t=in:st=0:d=${ai.fadeIn.toFixed(2)}`);
+            if (ai.fadeOut > 0 && effDur > ai.fadeOut) parts.push(`afade=t=out:st=${(effDur - ai.fadeOut).toFixed(2)}:d=${ai.fadeOut.toFixed(2)}`);
+            if (ai.volume !== 1) parts.push(`volume=${ai.volume.toFixed(2)}`);
+            parts.push(`adelay=${delayMs}|${delayMs}`);
+            F.push(`[${inputIdx}:a]${parts.join(',')}[tts${j}]`);
+            mixLabels.push(`[tts${j}]`);
+        });
+
+        if (mixLabels.length > 0) {
+            F.push(`[${aLabel}]${mixLabels.join('')}amix=inputs=${1 + mixLabels.length}:duration=first:normalize=0[aout]`);
             aLabel = 'aout';
         }
 
@@ -987,7 +1066,7 @@ router.post('/export', async (req, res) => {
             outFile,
         ];
 
-        console.log(`[VideoStudio] Export: ${n} clips, ${subtitles.length} subs, ${audioInfos.length} audios -> ${outId}.mp4`);
+        console.log(`[VideoStudio] Export: ${n} clips, ${overlayInfos.length} overlays, ${subtitles.length} subs, ${audioInfos.length} audios -> ${outId}.mp4`);
         await runFfmpeg(args, { timeoutMs: 1200000 });
 
         // 写入素材库元数据，让导出结果出现在「历史 / 素材」里
