@@ -3105,9 +3105,9 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                 )}
                             </div>
 
-                            {/* 输入区 */}
+                            {/* 输入区：输入框 + 发送按钮组成一个等高整体 */}
                             <div className="flex-shrink-0 border-t border-neutral-800 p-2">
-                                <div className="flex items-end gap-1.5">
+                                <div className="flex items-stretch gap-1.5 bg-neutral-900 border border-neutral-700 rounded-lg focus-within:border-cyan-600 overflow-hidden">
                                     <textarea
                                         value={assistantInput}
                                         onChange={e => setAssistantInput(e.target.value)}
@@ -3115,15 +3115,15 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                                         placeholder={applyingPlan ? '正在成片中…' : '回答问题或描述需求…（Enter 发送）'}
                                         rows={2}
                                         disabled={applyingPlan}
-                                        className="flex-1 resize-none bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-[11px] text-neutral-200 focus:border-cyan-600 outline-none disabled:opacity-50"
+                                        className="flex-1 resize-none bg-transparent px-2.5 py-2 text-[11px] leading-5 text-neutral-200 outline-none disabled:opacity-50"
                                     />
                                     <button
                                         onClick={() => sendAssistant()}
                                         disabled={assistantSending || applyingPlan || !assistantInput.trim()}
-                                        className="flex-shrink-0 w-8 h-8 rounded bg-cyan-600 hover:bg-cyan-500 flex items-center justify-center text-white disabled:opacity-40"
-                                        title="发送"
+                                        className="flex-shrink-0 w-11 self-stretch bg-cyan-600 hover:bg-cyan-500 flex items-center justify-center text-white transition-colors disabled:opacity-40 disabled:hover:bg-cyan-600"
+                                        title="发送（Enter）"
                                     >
-                                        {assistantSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                                        {assistantSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                                     </button>
                                 </div>
                             </div>
