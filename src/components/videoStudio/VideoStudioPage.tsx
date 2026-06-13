@@ -13,7 +13,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
     X, Play, Pause, Plus, Trash2, ChevronUp, ChevronDown, Scissors,
     Loader2, Download, Mic, Captions, Sparkles, Film, ArrowLeftRight, Check,
-    Undo2, Redo2, Maximize2, Minimize2, Save
+    Undo2, Redo2, Maximize2, Minimize2, Save, Send
 } from 'lucide-react';
 import { showAppConfirm } from '../ui/AppDialog';
 
@@ -56,6 +56,10 @@ interface Clip {
     posY: number;   // 位置偏移 -1 ~ 1（画面高度比例）
     effect: string | null; // 特效 id（见 FX_PRESETS）
     isImage?: boolean;     // 图片素材（显示时长 = 出点 - 入点）
+    // ---- AI 剪辑助手用的语义溯源字段（向后兼容，旧项目无此字段不影响）----
+    shotNo?: number;       // 镜头编号（从素材 title「镜头 04」解析）
+    dialogue?: string;     // 台词（从素材 prompt「台词：…」解析）
+    sourcePrompt?: string; // 原始生成提示词
 }
 
 /** 片段在时间轴上的有效时长（变速后） */
@@ -541,11 +545,12 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     void histVersion; // 触发重渲染用
 
     // ---- 右侧面板 Tab（视频 / 文字 / 声音 / 贴纸 / 特效 / 转场）----
-    const [panelTab, setPanelTab] = useState<'video' | 'text' | 'audio' | 'sticker' | 'fx' | 'trans'>('video');
+    const [panelTab, setPanelTab] = useState<'ai' | 'video' | 'text' | 'audio' | 'sticker' | 'fx' | 'trans'>('video');
 
-    // 选中对象时自动切换到对应 Tab
+    // 选中对象时自动切换到对应 Tab（在 AI 助手 Tab 时不打断对话）
     useEffect(() => {
         if (!selected) return;
+        if (panelTab === 'ai') return;
         if (selected.kind === 'clip' || selected.kind === 'overlay') { if (panelTab !== 'fx' && panelTab !== 'trans') setPanelTab('video'); }
         else if (selected.kind === 'sub') setPanelTab('text');
         else if (selected.kind === 'sticker') setPanelTab('sticker');
@@ -1060,27 +1065,34 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     // 时间轴操作
     // ============================================================================
 
-    const buildClip = (v: LibraryAsset, sourceDuration: number, outPoint: number, isImage: boolean): Clip => ({
-        id: uid(),
-        url: v.url,
-        name: (v.title || v.prompt || (isImage ? '图片' : '视频片段')).slice(0, 20),
-        sourceDuration,
-        inPoint: 0,
-        outPoint,
-        speed: 1,
-        muted: false,
-        volume: 1,
-        reverse: false,
-        rotate: 0 as const,
-        flipH: false,
-        flipV: false,
-        eq: { ...DEFAULT_EQ },
-        scale: 1,
-        posX: 0,
-        posY: 0,
-        effect: null,
-        isImage,
-    });
+    const buildClip = (v: LibraryAsset, sourceDuration: number, outPoint: number, isImage: boolean): Clip => {
+        const sn = shotNo(v);
+        const dlg = (v.prompt || '').match(/台词[:：]\s*(.+)/);
+        return {
+            id: uid(),
+            url: v.url,
+            name: (v.title || v.prompt || (isImage ? '图片' : '视频片段')).slice(0, 20),
+            sourceDuration,
+            inPoint: 0,
+            outPoint,
+            speed: 1,
+            muted: false,
+            volume: 1,
+            reverse: false,
+            rotate: 0 as const,
+            flipH: false,
+            flipV: false,
+            eq: { ...DEFAULT_EQ },
+            scale: 1,
+            posX: 0,
+            posY: 0,
+            effect: null,
+            isImage,
+            shotNo: Number.isFinite(sn) ? sn : undefined,
+            dialogue: dlg ? dlg[1].trim() : undefined,
+            sourcePrompt: v.prompt || undefined,
+        };
+    };
 
     const appendClip = (clip: Clip) => {
         setClips(prev => {
@@ -2223,6 +2235,162 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
     };
 
     // ============================================================================
+    // AI 剪辑助手：对话 → 结构化动作 → 执行到时间轴
+    // ============================================================================
+
+    interface AssistantMsg { role: 'user' | 'assistant'; content: string; plan?: AssistantPlan | null; applied?: boolean; }
+    interface AssistantAction { type: string; [k: string]: any; }
+    interface AssistantPlan { explanation: string; actions: AssistantAction[]; }
+
+    const [assistantMsgs, setAssistantMsgs] = useState<AssistantMsg[]>([]);
+    const [assistantInput, setAssistantInput] = useState('');
+    const [assistantSending, setAssistantSending] = useState(false);
+    const [applyingPlan, setApplyingPlan] = useState(false);
+    const [applyProgress, setApplyProgress] = useState('');
+
+    /** 把当前剧本/素材/时间轴打包成精简上下文喂给 AI */
+    const buildAssistantContext = useCallback(() => {
+        const r = RESOLUTIONS.find(x => x.id === resolution) || RESOLUTIONS[0];
+        return {
+            resolution: { id: resolution, width: r.w, height: r.h, aspect: r.w >= r.h ? '16:9' : '9:16' },
+            script: script || '',
+            voice,
+            library: library.map(v => {
+                const sn = shotNo(v);
+                const dlg = (v.prompt || '').match(/台词[:：]\s*(.+)/);
+                return {
+                    id: v.id,
+                    assetType: v.assetType,
+                    shotNo: Number.isFinite(sn) ? sn : null,
+                    title: v.title || '',
+                    dialogue: dlg ? dlg[1].trim() : '',
+                    prompt: (v.prompt || '').slice(0, 120),
+                };
+            }),
+            timeline: {
+                clips: clips.map((c, i) => ({
+                    idx: i, name: c.name, shotNo: c.shotNo ?? null,
+                    start: +clipStarts[i].toFixed(2), dur: +clipDur(c).toFixed(2),
+                    isImage: !!c.isImage, dialogue: c.dialogue || '',
+                })),
+                subtitles: subtitles.map(s => ({ text: s.text, start: +s.start.toFixed(2), end: +s.end.toFixed(2) })),
+                audios: audios.map(a => ({ track: aTrack(a), start: +a.start.toFixed(2), dur: +audioDur(a).toFixed(2), isMusic: !!a.isMusic })),
+                transitions: transitions.map(t => t.type),
+                totalDuration: +totalDuration.toFixed(2),
+            },
+        };
+    }, [resolution, script, voice, library, clips, clipStarts, subtitles, audios, transitions, totalDuration]);
+
+    /** 执行一个 AI 方案的动作列表 */
+    const applyAssistantPlan = async (plan: AssistantPlan) => {
+        if (applyingPlan || !plan?.actions?.length) return;
+        setApplyingPlan(true);
+        setErrorMsg(null);
+        let clipCount = clips.length;
+        try {
+            for (const act of plan.actions) {
+                if (act.type === 'add_clips' && Array.isArray(act.assetIds)) {
+                    setApplyProgress('正在添加素材…');
+                    const assets = act.assetIds
+                        .map((id: string) => library.find(v => v.id === id))
+                        .filter(Boolean) as LibraryAsset[];
+                    if (assets.length === 0) continue;
+                    const durations = await Promise.all(assets.map(v =>
+                        v.assetType === 'image' ? Promise.resolve(4) : probeVideoDuration(v.url.startsWith('http') ? v.url : `${v.url}`)
+                    ));
+                    const newClips: Clip[] = [];
+                    assets.forEach((v, i) => {
+                        if (v.assetType === 'image') newClips.push(buildClip(v, 600, 4, true));
+                        else if (durations[i] > 0) newClips.push(buildClip(v, durations[i], durations[i], false));
+                    });
+                    if (newClips.length > 0) {
+                        clipCount += newClips.length;
+                        setClips(prev => {
+                            const next = [...prev, ...newClips];
+                            setTransitions(tp => {
+                                const need = Math.max(0, next.length - 1);
+                                const arr = [...tp];
+                                while (arr.length < need) arr.push({ type: 'none', duration: 0.5 });
+                                return arr.slice(0, need);
+                            });
+                            return next;
+                        });
+                    }
+                } else if (act.type === 'add_subtitles' && Array.isArray(act.items)) {
+                    const newSubs: SubtitleItem[] = act.items
+                        .filter((it: any) => it && it.text != null)
+                        .map((it: any) => ({
+                            id: uid(),
+                            text: String(it.text),
+                            start: Math.max(0, Number(it.start) || 0),
+                            end: Math.max(Number(it.start) || 0, Number(it.end) || (Number(it.start) || 0) + 2),
+                            style: { ...defaultStyle },
+                        }));
+                    if (newSubs.length > 0) setSubtitles(prev => [...prev, ...newSubs].sort((a, b) => a.start - b.start));
+                } else if (act.type === 'set_transitions') {
+                    const type = String(act.transition || act.type || 'fade');
+                    const need = Math.max(0, clipCount - 1);
+                    setTransitions(() => Array.from({ length: need }, () => ({ type, duration: 0.5 })));
+                } else if (act.type === 'voiceover' && Array.isArray(act.sentences)) {
+                    const sentences = act.sentences.map((s: any) => String(s).trim()).filter(Boolean);
+                    let cursor = Number(act.startAt) || 0;
+                    const newAudios: AudioItem[] = [];
+                    const newSubs: SubtitleItem[] = [];
+                    for (let i = 0; i < sentences.length; i++) {
+                        setApplyProgress(`正在合成配音 ${i + 1}/${sentences.length} 句…`);
+                        const resp = await fetch('/api/video-studio/tts', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ text: sentences[i], voice }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.error || '语音合成失败');
+                        newAudios.push({ id: uid(), url: data.url, text: sentences[i], start: cursor, duration: data.duration, inPoint: 0, outPoint: data.duration, volume: 1, muted: false, speed: 1, fadeIn: 0, fadeOut: 0, track: 0 });
+                        newSubs.push({ id: uid(), text: sentences[i].replace(/[，。！？、；：…,.!?;:\s]+$/u, '') || sentences[i], start: cursor, end: cursor + data.duration, style: { ...defaultStyle } });
+                        cursor += data.duration + 0.15;
+                    }
+                    if (newAudios.length > 0) {
+                        setAudios(prev => [...prev, ...newAudios]);
+                        setSubtitles(prev => [...prev, ...newSubs].sort((a, b) => a.start - b.start));
+                    }
+                }
+            }
+            setAssistantMsgs(prev => prev.map(m => m.plan === plan ? { ...m, applied: true } : m));
+        } catch (err: any) {
+            setErrorMsg(err.message || '执行失败');
+        } finally {
+            setApplyingPlan(false);
+            setApplyProgress('');
+        }
+    };
+
+    const sendAssistant = async () => {
+        const text = assistantInput.trim();
+        if (!text || assistantSending) return;
+        const history = [...assistantMsgs, { role: 'user' as const, content: text }];
+        setAssistantMsgs(history);
+        setAssistantInput('');
+        setAssistantSending(true);
+        setErrorMsg(null);
+        try {
+            const resp = await fetch('/api/video-studio/assistant', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: history.map(m => ({ role: m.role, content: m.content })),
+                    context: buildAssistantContext(),
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'AI 助手请求失败');
+            setAssistantMsgs(prev => [...prev, { role: 'assistant', content: data.reply || '好的。', plan: data.plan || null }]);
+        } catch (err: any) {
+            setErrorMsg(err.message || 'AI 助手请求失败');
+            setAssistantMsgs(prev => [...prev, { role: 'assistant', content: `出错了：${err.message || '请求失败'}`, plan: null }]);
+        } finally {
+            setAssistantSending(false);
+        }
+    };
+
+    // ============================================================================
     // 导出
     // ============================================================================
 
@@ -2820,6 +2988,13 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                 <div className="w-72 border-l border-neutral-800 flex flex-col flex-shrink-0">
                     {/* Tab 头 */}
                     <div className="flex border-b border-neutral-800 flex-shrink-0">
+                        <button
+                            onClick={() => setPanelTab('ai')}
+                            className={`flex items-center justify-center gap-1 px-2 py-2.5 text-[11px] font-medium transition-colors ${panelTab === 'ai' ? 'text-cyan-300 border-b-2 border-cyan-400 bg-cyan-500/10' : 'text-cyan-500/70 hover:text-cyan-300'}`}
+                            title="AI 剪辑助手"
+                        >
+                            <Sparkles size={12} /> AI
+                        </button>
                         {([['video', '视频'], ['text', '文字'], ['audio', '声音'], ['sticker', '贴纸'], ['fx', '特效'], ['trans', '转场']] as const).map(([tab, label]) => (
                             <button
                                 key={tab}
@@ -2831,7 +3006,83 @@ export const VideoStudioPage: React.FC<VideoStudioPageProps> = ({ isOpen, onClos
                         ))}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto">
+                    {/* ===== AI 剪辑助手 Tab ===== */}
+                    {panelTab === 'ai' && (
+                        <div className="flex-1 min-h-0 flex flex-col">
+                            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+                                {assistantMsgs.length === 0 && (
+                                    <div className="text-[11px] text-neutral-500 leading-5 space-y-2">
+                                        <div className="flex items-center gap-1.5 text-cyan-300 font-bold text-xs"><Sparkles size={13} /> AI 剪辑助手</div>
+                                        <p>用一句话告诉我你想怎么剪，我会读取你的素材、剧本和当前时间轴，给出方案并替你执行。例如：</p>
+                                        <div className="space-y-1.5">
+                                            {[
+                                                '按镜头顺序把所有素材排进时间轴',
+                                                '把每个镜头的台词作为字幕对齐上去',
+                                                '用解说脚本生成配音和字幕',
+                                                '在所有片段之间加淡入淡出转场',
+                                            ].map(s => (
+                                                <button key={s} onClick={() => setAssistantInput(s)}
+                                                    className="block w-full text-left px-2.5 py-1.5 rounded border border-neutral-800 bg-neutral-900 hover:border-cyan-600 hover:text-cyan-300 text-neutral-400 transition-colors">
+                                                    {s}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                {assistantMsgs.map((m, i) => (
+                                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`max-w-[88%] rounded-lg px-2.5 py-1.5 text-[11px] leading-5 whitespace-pre-wrap ${m.role === 'user' ? 'bg-cyan-600/25 text-cyan-100' : 'bg-neutral-800 text-neutral-200'}`}>
+                                            {m.content}
+                                            {m.role === 'assistant' && m.plan && m.plan.actions.length > 0 && (
+                                                <div className="mt-2 pt-2 border-t border-neutral-700/70">
+                                                    <div className="text-[10px] text-neutral-400 mb-1.5">方案包含 {m.plan.actions.length} 个剪辑动作</div>
+                                                    {m.applied ? (
+                                                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><Check size={11} /> 已执行（可用撤销回退）</span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => applyAssistantPlan(m.plan!)}
+                                                            disabled={applyingPlan}
+                                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-medium disabled:opacity-50"
+                                                        >
+                                                            {applyingPlan ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />} 执行方案
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                {assistantSending && (
+                                    <div className="flex justify-start"><div className="rounded-lg px-2.5 py-1.5 bg-neutral-800 text-neutral-400 text-[11px] flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> 思考中…</div></div>
+                                )}
+                                {applyProgress && (
+                                    <div className="text-[10px] text-cyan-400 flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> {applyProgress}</div>
+                                )}
+                            </div>
+                            <div className="flex-shrink-0 border-t border-neutral-800 p-2">
+                                <div className="flex items-end gap-1.5">
+                                    <textarea
+                                        value={assistantInput}
+                                        onChange={e => setAssistantInput(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssistant(); } }}
+                                        placeholder="描述你想怎么剪辑…（Enter 发送）"
+                                        rows={2}
+                                        className="flex-1 resize-none bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-[11px] text-neutral-200 focus:border-cyan-600 outline-none"
+                                    />
+                                    <button
+                                        onClick={sendAssistant}
+                                        disabled={assistantSending || !assistantInput.trim()}
+                                        className="flex-shrink-0 w-8 h-8 rounded bg-cyan-600 hover:bg-cyan-500 flex items-center justify-center text-white disabled:opacity-40"
+                                        title="发送"
+                                    >
+                                        {assistantSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className={`flex-1 overflow-y-auto ${panelTab === 'ai' ? 'hidden' : ''}`}>
                     {/* ===== 视频 Tab ===== */}
                     {panelTab === 'video' && !selClip && !selOverlay && (
                         <div className="p-4 text-xs text-neutral-600 text-center leading-5">

@@ -209,6 +209,106 @@ router.post('/script', async (req, res) => {
 });
 
 // ============================================================================
+// AI 剪辑助手：把自然语言需求 + 当前剪辑上下文 → 结构化剪辑动作 JSON
+// ============================================================================
+
+const ASSISTANT_SYSTEM_PROMPT = `你是「Magical Canvas」视频剪辑工作室里的 AI 剪辑助手。用户用自然语言提需求，你结合提供的「剪辑上下文」给出可执行的剪辑方案。
+
+# 你能调用的剪辑动作（actions）
+
+每个动作是一个对象，type 字段决定类型：
+
+1. add_clips —— 把素材按给定顺序追加到主视频轨末尾
+   { "type": "add_clips", "assetIds": ["素材id", ...] }
+   说明：assetId 必须来自上下文 library[].id。要"按镜头顺序排好"时，按 library 里的 shotNo 升序排列 id。
+
+2. add_subtitles —— 添加字幕（时间单位：秒，相对整个时间轴）
+   { "type": "add_subtitles", "items": [ { "text": "字幕文字", "start": 0, "end": 3 }, ... ] }
+   说明：要"台词对齐镜头"时，用 timeline.clips[].start 和 dur 计算每个片段的时间区间，把对应 clip 的 dialogue 作为字幕填入该区间。
+
+3. set_transitions —— 设置片段间转场
+   { "type": "set_transitions", "transition": "fade" }   // 给所有相邻片段统一设置
+   可用 transition：none, fade, fadeblack, dissolve, wipeleft, wiperight, slideleft, slideright, circleopen, radial, smoothleft 等 ffmpeg xfade 名称；不确定就用 fade。
+
+4. voiceover —— 把解说词逐句生成配音（TTS）并加到配音轨，同时生成对齐字幕
+   { "type": "voiceover", "sentences": ["第一句。", "第二句。"] }
+   说明：当用户要"配解说/旁白/配音"时用。如果上下文里有 script（解说脚本），优先按它分句。
+
+# 输出格式（必须严格遵守）
+
+先用 1-3 句中文自然语言说明你的方案，然后输出一个 \`\`\`json 代码块，内容是：
+{ "explanation": "给用户看的方案简述", "actions": [ ...动作... ] }
+
+- 如果用户只是闲聊或提问、不需要执行剪辑，actions 给空数组 []。
+- 只输出一个 json 代码块。assetId / 时间都要基于上下文真实数据，不要编造。
+- 时间、时长都用秒（数字）。`;
+
+router.post('/assistant', async (req, res) => {
+    try {
+        const { messages, context } = req.body || {};
+        const apiKey = getKey('TEXT_API_KEY');
+        if (!apiKey) {
+            return res.status(500).json({ error: '未配置文字模型 KEY，请在「设置」中填写' });
+        }
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: '缺少对话消息' });
+        }
+
+        const contextText = '# 当前剪辑上下文（JSON）\n```json\n' + JSON.stringify(context || {}, null, 2) + '\n```';
+        const oaMessages = [
+            { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
+            { role: 'system', content: contextText },
+            ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
+        ];
+
+        // 上游中转站对推理型模型偶发「临时不可用 / 限流」，自动重试几次再判失败
+        let raw = '';
+        let lastErr = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+                raw = await gpt2apiChat({
+                    messages: oaMessages,
+                    model: getKey('TEXT_MODEL') || 'grok-4.20-fast',
+                    baseUrl: getKey('TEXT_API_URL'),
+                    apiKey,
+                    temperature: 0.4,
+                    maxTokens: 2048,
+                });
+                if (raw && raw.trim()) { lastErr = null; break; }
+            } catch (e) {
+                lastErr = e;
+                const msg = String(e?.message || '');
+                // 仅对可恢复的瞬时错误重试（限流 / 暂不可用 / 网关错误）
+                if (!/unavailable|temporarily|rate|limit|429|500|502|503|504|timeout|超时/i.test(msg)) throw e;
+                await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+            }
+        }
+        if (lastErr) throw lastErr;
+
+        // 从回复中抽取 json 代码块作为可执行方案；抽取失败则只返回文本
+        let plan = null;
+        let reply = (raw || '').trim();
+        const fence = reply.match(/```json\s*([\s\S]*?)```/i) || reply.match(/```\s*([\s\S]*?)```/);
+        if (fence) {
+            try {
+                const parsed = JSON.parse(fence[1].trim());
+                if (parsed && Array.isArray(parsed.actions)) {
+                    plan = { explanation: String(parsed.explanation || ''), actions: parsed.actions };
+                }
+            } catch { /* JSON 解析失败：当作纯文本回复 */ }
+            // 把 json 代码块从给用户看的文本里去掉，避免重复展示
+            reply = reply.replace(/```json\s*[\s\S]*?```/i, '').replace(/```\s*[\s\S]*?```/, '').trim();
+        }
+        if (!reply && plan?.explanation) reply = plan.explanation;
+
+        res.json({ reply: reply || '好的。', plan });
+    } catch (error) {
+        console.error('[VideoStudio] Assistant error:', error);
+        res.status(500).json({ error: error.message || 'AI 助手请求失败' });
+    }
+});
+
+// ============================================================================
 // 智能字幕：语音识别（OpenAI 兼容 /audio/transcriptions 接口）
 // ============================================================================
 
