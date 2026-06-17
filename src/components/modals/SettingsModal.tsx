@@ -67,7 +67,7 @@ const GROUPS: GroupDef[] = [
         title: '生成设置',
         desc: '批量生成与一键创作的调度参数。',
         fields: [
-            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '3', hint: '同时进行的生图/生视频任务数，1-6。过大可能触发接口限流或导致预览加载失败' },
+            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '3', hint: '同时进行的生图/生视频任务数，1-20。过大可能触发接口限流或导致预览加载失败，建议 3-8' },
         ],
     },
 ];

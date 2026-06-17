@@ -474,13 +474,13 @@ export default function App() {
   // 十几个生图请求同时挂起会饿死图片预览请求，导致节点裂图。
   const storyAutoGenRef = useRef<{ assetIds: string[]; shotIds: string[]; phase: 'assets' | 'shots' | 'done'; launched: Set<string> } | null>(null);
 
-  // 生成并发数：从「设置」读取（GEN_CONCURRENCY，1-6），默认 3
+  // 生成并发数：从「设置」读取（GEN_CONCURRENCY，1-20），默认 3
   const genConcurrencyRef = useRef(3);
   const refreshGenConcurrency = React.useCallback(async () => {
     try {
       const data = await fetch('/api/settings').then(r => r.json());
       const v = parseInt(data?.settings?.GEN_CONCURRENCY, 10);
-      genConcurrencyRef.current = Number.isFinite(v) ? Math.min(6, Math.max(1, v)) : 3;
+      genConcurrencyRef.current = Number.isFinite(v) ? Math.min(20, Math.max(1, v)) : 3;
     } catch { /* 读取失败时沿用当前值 */ }
     return genConcurrencyRef.current;
   }, []);
