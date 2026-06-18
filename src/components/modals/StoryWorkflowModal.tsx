@@ -26,6 +26,7 @@ export interface StoryShot {
     videoPrompt: string;
     duration: number;
     dialogue: string;
+    dialogues?: { speaker: string; line: string }[];
     shotSize?: string;
     keyframe?: 'single' | 'startend';
 }
@@ -41,6 +42,7 @@ export interface StoryWorkflowResult {
     props: StoryAsset[];
     shots: StoryShot[];
     screenplay?: string;
+    narration?: string;
     quality?: {
         grade: 'good' | 'fair' | 'poor';
         summary: string;
@@ -302,7 +304,7 @@ export const StoryWorkflowModal: React.FC<StoryWorkflowModalProps> = ({ isOpen, 
                         </div>
                         <div>
                             <h2 className="text-sm font-semibold text-white">一键创建工作流</h2>
-                            <p className="text-[11px] text-neutral-500">三段式 AI 流水线：小说 → 节拍剧本 → 人物/场景/道具 → 分镜</p>
+                            <p className="text-[11px] text-neutral-500">四段式 AI 流水线：小说 → 节拍剧本 → 人物/场景/道具 → 分镜 → 解说旁白</p>
                         </div>
                     </div>
                     <button onClick={onClose} disabled={loading} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40">
@@ -483,7 +485,7 @@ export const StoryWorkflowModal: React.FC<StoryWorkflowModalProps> = ({ isOpen, 
                 {/* Footer */}
                 <div className="flex items-center justify-between px-5 py-3.5 border-t border-white/[0.06] bg-black/20">
                     <div className="text-[10px] text-neutral-600">
-                        {loading ? '三段式 AI 分析中，约需 2～5 分钟，请勿关闭…' : '三段式流水线，使用「设置」中配置的文字模型'}
+                        {loading ? '四段式 AI 分析中，约需 2～5 分钟，请勿关闭…' : '四段式流水线，使用「设置」中配置的文字模型'}
                     </div>
                     <div className="flex gap-2">
                         <button onClick={onClose} disabled={loading}
@@ -503,13 +505,13 @@ export const StoryWorkflowModal: React.FC<StoryWorkflowModalProps> = ({ isOpen, 
                             <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-cyan-400 animate-spin" />
                             <div className="absolute inset-0 flex items-center justify-center"><Wand2 size={22} className="text-cyan-400" /></div>
                         </div>
-                        {/* 三段步骤指示 */}
+                        {/* 四段步骤指示 */}
                         <div className="flex items-center gap-2 mb-3">
-                            {['剧本', '资产', '分镜'].map((s, i) => (
+                            {['剧本', '资产', '分镜', '解说'].map((s, i, arr) => (
                                 <div key={s} className={`flex items-center gap-1 text-[11px] ${stageNo > i + 1 ? 'text-emerald-400' : stageNo === i + 1 ? 'text-cyan-300' : 'text-neutral-600'}`}>
                                     <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] border ${stageNo >= i + 1 ? 'border-current' : 'border-neutral-700'}`}>{i + 1}</span>
                                     {s}
-                                    {i < 2 && <span className="mx-0.5 text-neutral-700">→</span>}
+                                    {i < arr.length - 1 && <span className="mx-0.5 text-neutral-700">→</span>}
                                 </div>
                             ))}
                         </div>

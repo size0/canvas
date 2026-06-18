@@ -813,6 +813,7 @@ export default function App() {
         `《${result.title || '未命名'}》`,
         result.summary || '',
         `【风格锚定】${result.styleAnchor || ''}`,
+        result.narration ? `\n【解说旁白】（可整体复制到视频剪辑里逐句配音）\n${result.narration}` : '',
         result.screenplay ? `\n【节拍剧本】\n${result.screenplay}` : '',
         result.quality ? `\n【对白检测】${result.quality.summary}${result.quality.warnings?.length ? '\n' + result.quality.warnings.map(w => `⚠ ${w}`).join('\n') : ''}` : '',
       ].filter(Boolean).join('\n\n'),
@@ -855,7 +856,7 @@ export default function App() {
     const mkVideo = (shot: any, i: number, parentIds: string[]): NodeData => ({
       ...defaults, id: crypto.randomUUID(), type: NodeType.VIDEO,
       title: `镜头 ${String(i + 1).padStart(2, '0')} 视频`, x: 0, y: 0,
-      prompt: [shot.videoPrompt || shot.description || '', shot.dialogue ? `台词：${shot.dialogue}` : ''].filter(Boolean).join('\n'),
+      prompt: [shot.videoPrompt || shot.description || '', shot.dialogue ? `对白（含说话人）：\n${shot.dialogue}` : ''].filter(Boolean).join('\n'),
       aspectRatio: ratio, videoDuration: Math.max(2, Math.min(15, Number(shot.duration) || 6)), parentIds,
     });
 

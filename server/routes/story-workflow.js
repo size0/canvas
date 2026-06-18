@@ -12,7 +12,7 @@
 import express from 'express';
 import { getKey } from '../config.js';
 import { gpt2apiChat } from '../services/gpt2api.js';
-import { BUILTIN_TEMPLATES, SCREENPLAY_PROMPT, buildAssetPrompt, buildStoryboardPrompt } from './prompt-templates.js';
+import { BUILTIN_TEMPLATES, SCREENPLAY_PROMPT, NARRATION_PROMPT, buildAssetPrompt, buildStoryboardPrompt } from './prompt-templates.js';
 import { analyzeScreenplayQuality } from '../utils/screenplay-quality.js';
 
 const router = express.Router();
@@ -142,6 +142,7 @@ router.post('/analyze', async (req, res) => {
             `画幅：${ratioDesc}`,
             `单镜头基准时长：${dur} 秒（每个镜头 duration 默认填 ${dur}；绝对不要用 1-2 秒碎时长）`,
             `内容密度：每个镜头要装下约 ${dur} 秒的内容——把同一场景连续发生的多个节拍/多句台词合并进同一镜头来填满时长，不要每句台词就切一个镜头${dur >= 8 ? `（${dur} 秒的镜头通常应包含连续 2-3 句对白或一段完整动作）` : ''}`,
+            `台词要求：剧本里出现的角色对白必须尽量保留并写进对应镜头的 dialogue 字段（逐字摘录、不要概括），让绝大多数镜头都有台词；只有纯空镜/纯环境镜头才允许 dialogue 为空`,
             shotCountReq,
             `可用人物：${charNames.join('、') || '无'}`,
             `可用场景：${sceneNames.join('、') || '无'}`,
@@ -171,13 +172,55 @@ router.post('/analyze', async (req, res) => {
         };
         data.shots.forEach((s, i) => {
             s.index = i + 1;
-            // 时长严格以用户选择的基准时长为准；仅当台词较长时按字数(约每秒3字)加长，避免 AI 自定义碎时长
-            const dlgLen = String(s.dialogue || '').replace(/[^\u4e00-\u9fa5a-zA-Z]/g, '').length;
-            const dlgMin = dlgLen > 0 ? Math.ceil(dlgLen / 3) + 1 : 0;
-            s.duration = Math.min(15, Math.max(dur, dlgMin));
             s.characters = Array.isArray(s.characters) ? s.characters : [];
             s.props = Array.isArray(s.props) ? s.props : [];
+
+            // 台词说话人标注：以结构化 dialogues 为准，生成「角色名：台词」纯文本；
+            // 若只给了 dialogue 文本则原样保留。保证字幕/配音知道是谁在说。
+            if (Array.isArray(s.dialogues) && s.dialogues.length) {
+                s.dialogues = s.dialogues
+                    .map(d => ({ speaker: String(d?.speaker || '').trim(), line: String(d?.line || '').trim() }))
+                    .filter(d => d.line);
+                s.dialogue = s.dialogues
+                    .map(d => d.speaker ? `${d.speaker}：${d.line}` : d.line)
+                    .join('\n');
+            } else {
+                s.dialogue = String(s.dialogue || '');
+                s.dialogues = [];
+            }
+
+            // 时长严格以用户选择的基准时长为准；仅当台词较长时按字数(约每秒3字)加长，避免 AI 自定义碎时长
+            const dlgLen = s.dialogue.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, '').length;
+            const dlgMin = dlgLen > 0 ? Math.ceil(dlgLen / 3) + 1 : 0;
+            s.duration = Math.min(15, Math.max(dur, dlgMin));
         });
+
+        // ===== 第 4 段：剧本 + 分镜 → 连贯解说旁白（解说体，写入剧本节点供整体配音） =====
+        send({ type: 'status', message: '第 4/4 步：正在撰写解说旁白…' });
+        const totalDur = data.shots.reduce((s, sh) => s + (Number(sh.duration) || dur), 0);
+        const narrationSys = (prompts?.narration || NARRATION_PROMPT);
+        const shotDigest = data.shots
+            .map(s => `镜${s.index}(${s.scene || ''}/${s.duration}s)：${s.description || ''}${s.dialogue ? ` 台词:${s.dialogue}` : ''}`)
+            .join('\n')
+            .slice(0, 8000);
+        const narrationUser = [
+            `【视频总时长】约 ${totalDur} 秒（旁白总字数控制在 ${Math.round(totalDur * 3 * 0.55)}~${Math.round(totalDur * 3 * 0.7)} 字之间，给角色对白留出时间）`,
+            `【画幅】${ratioDesc}`,
+            `【分镜清单（按播放顺序，含画面与角色台词）】\n${shotDigest}`,
+            `\n【剧本全文（参考剧情与人物关系）】\n${screenplay}`,
+            `\n请据此写出与画面/对白并行的第三人称解说旁白，逐句换行，只输出解说正文。`,
+        ].join('\n');
+        let narration = '';
+        try {
+            narration = await callModel({
+                system: narrationSys, user: narrationUser, maxTokens: 8000, temperature: 0.7,
+                send, stage: '撰写解说', onChars: (c) => send({ type: 'progress', stage: 4, chars: c }),
+            });
+            narration = String(narration || '').trim();
+        } catch (e) {
+            console.warn('[story-workflow] narration failed (非致命):', e.message);
+        }
+        data.narration = narration;
 
         const quality = analyzeScreenplayQuality({
             screenplay,
