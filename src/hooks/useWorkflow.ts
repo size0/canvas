@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useCallback, Dispatch, SetStateAction } from 'react';
-import { NodeData, NodeGroup, Viewport } from '../types';
+import { NodeData, NodeGroup, Viewport, NodeStatus } from '../types';
 
 interface WorkflowData {
     id: string | null;
@@ -102,7 +102,15 @@ export const useWorkflow = ({
 
                 setCanvasTitle(workflow.title || '未命名');
                 setEditingTitleValue(workflow.title || '未命名');
-                setNodes(workflow.nodes || []);
+                // 重启/切换画布后，上一会话遗留的 LOADING 节点其生成任务早已随进程结束而中断。
+                // 这里直接复位为待生成（IDLE），既不显示假的「生成中」转圈，也绝不自动续跑，
+                // 避免用户感知到的「重启后自动重新生成」。需要时用户可手动点生成或批量生成。
+                const loadedNodes: NodeData[] = (workflow.nodes || []).map((n: NodeData) =>
+                    n.status === NodeStatus.LOADING
+                        ? { ...n, status: NodeStatus.IDLE, generationStartTime: undefined }
+                        : n
+                );
+                setNodes(loadedNodes);
                 setGroups(workflow.groups || []); // Restore groups
                 // Reset selection
                 setSelectedNodeIds([]);

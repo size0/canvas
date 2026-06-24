@@ -11,7 +11,7 @@ import { Toolbar } from './components/Toolbar';
 import { TopBar } from './components/TopBar';
 import { CanvasNode } from './components/canvas/CanvasNode';
 import { ConnectionsLayer, getNodeWidth, getNodeHeight } from './components/canvas/ConnectionsLayer';
-import { LayoutGrid, RotateCcw } from 'lucide-react';
+import { LayoutGrid, RotateCcw, Square } from 'lucide-react';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeStatus, NodeType } from './types';
 import { generateImage, generateVideo } from './services/generationService';
@@ -278,11 +278,14 @@ export default function App() {
   // Load workflow and update tracking
   const handleLoadWithTracking = async (id: string) => {
     ignoreNextChange.current = true;
+    // 切换/加载画布前，中止在途生成并清掉自动队列，避免上一画布的生成串到新画布
+    cancelAllGenerations();
+    storyAutoGenRef.current = null;
     await handleLoadWorkflow(id);
     setIsDirty(false);
   };
 
-  const { handleGenerate } = useGeneration({
+  const { handleGenerate, cancelAllGenerations } = useGeneration({
     nodes,
     updateNode
   });
@@ -781,6 +784,24 @@ export default function App() {
     };
     setIsBatchGenOpen(false);
   }, [nodes, setNodes, refreshGenConcurrency]);
+
+  // 正在生成（LOADING）的图片/视频节点数量，用于显示「停止生成」入口
+  const generatingCount = React.useMemo(
+    () => nodes.filter(n => (n.type === NodeType.IMAGE || n.type === NodeType.VIDEO) && n.status === NodeStatus.LOADING).length,
+    [nodes]
+  );
+
+  // 停止全部生成：①断开自动队列，阻止后续节点启动；②中止在途网络请求；③把还在 LOADING 的节点复位为待生成
+  const handleStopAllGenerations = React.useCallback(() => {
+    storyAutoGenRef.current = null; // 关键：清掉自动队列，避免继续调度下一批
+    cancelAllGenerations();
+    setNodes(prev => prev.map(n =>
+      (n.type === NodeType.IMAGE || n.type === NodeType.VIDEO) && n.status === NodeStatus.LOADING
+        ? { ...n, status: NodeStatus.IDLE, generationStartTime: undefined, errorMessage: undefined }
+        : n
+    ));
+    setIsBatchGenOpen(false);
+  }, [cancelAllGenerations, setNodes]);
 
   const handleCreateStoryWorkflow = React.useCallback((result: StoryWorkflowResult, opts: { autoGenerate: boolean; aspectRatio?: string; keyframeMode?: 'auto' | 'single' | 'startend' | 'grid9' }) => {
     const GAP_X = 160;
@@ -1987,6 +2008,15 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                  {generatingCount > 0 && (
+                    <button
+                      onClick={handleStopAllGenerations}
+                      className="w-full mt-2 px-2 py-2 text-[11px] rounded-lg border transition-colors text-amber-400 border-amber-500/40 hover:bg-amber-500/10"
+                      title="停止当前所有图片/视频生成，断开自动队列，释放资源"
+                    >
+                      停止全部生成（{generatingCount} 个进行中）
+                    </button>
+                  )}
                   <div className={`mt-1.5 pt-1.5 border-t text-[10px] ${canvasTheme === 'dark' ? 'border-neutral-800 text-neutral-600' : 'border-neutral-100 text-neutral-400'}`}>
                     按队列依次生成（并发数在「设置 · 生成设置」中调整）；「全部」会重新生成已有内容；「存素材」把已生成内容批量存入素材库
                   </div>
@@ -1994,6 +2024,18 @@ export default function App() {
               </>
             )}
           </div>
+
+          {/* 停止生成：仅在有生成进行中时显示，便于随时中止、避免浪费资源 */}
+          {generatingCount > 0 && (
+            <button
+              onClick={handleStopAllGenerations}
+              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-full transition-colors text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+              title="停止当前所有图片/视频生成，断开自动队列，释放资源"
+            >
+              <Square size={12} className="fill-current" />
+              停止生成 ({generatingCount})
+            </button>
+          )}
         </div>
       )}
 

@@ -19,6 +19,7 @@ export interface GenerateImageParams {
   klingFaceIntensity?: number; // 0-100
   klingSubjectIntensity?: number; // 0-100
   title?: string; // 节点标题（如「分镜 01」），存入素材元数据供剪辑页区分
+  signal?: AbortSignal; // 用于「停止生成」中止在途请求
 }
 
 export interface GenerateVideoParams {
@@ -33,6 +34,7 @@ export interface GenerateVideoParams {
   generateAudio?: boolean; // For Kling 2.6 and Veo 3.1 native audio (default: true)
   nodeId?: string; // ID of the node initiating generation
   title?: string; // 节点标题（如「镜头 01 视频」），存入素材元数据供剪辑页区分
+  signal?: AbortSignal; // 用于「停止生成」中止在途请求
 }
 
 /**
@@ -40,10 +42,12 @@ export interface GenerateVideoParams {
  */
 export const generateImage = async (params: GenerateImageParams): Promise<string> => {
   try {
+    const { signal, ...body } = params;
     const response = await fetch('/api/generate-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
+      body: JSON.stringify(body),
+      signal
     });
 
     if (!response.ok) {
@@ -68,10 +72,12 @@ export const generateImage = async (params: GenerateImageParams): Promise<string
  */
 export const generateVideo = async (params: GenerateVideoParams): Promise<string> => {
   try {
+    const { signal, ...body } = params;
     const response = await fetch('/api/generate-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
+      body: JSON.stringify(body),
+      signal
     });
 
     if (!response.ok) {

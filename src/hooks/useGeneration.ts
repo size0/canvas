@@ -5,6 +5,7 @@
  * Manages generation state, API calls, and error handling.
  */
 
+import { useRef } from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
@@ -16,6 +17,8 @@ interface UseGenerationProps {
 }
 
 export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
+    // 在途生成的中止控制器（按 nodeId 索引），供「停止生成」中止网络请求、释放资源
+    const abortControllers = useRef<Map<string, AbortController>>(new Map());
     // ============================================================================
     // HELPERS
     // ============================================================================
@@ -108,6 +111,10 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
         if (!combinedPrompt && !isKlingFrameToFrame) return;
 
+        // 为本次生成建立中止控制器（覆盖同节点的旧控制器）
+        const controller = new AbortController();
+        abortControllers.current.set(id, controller);
+
         updateNode(id, { status: NodeStatus.LOADING, generationStartTime: Date.now() });
 
         try {
@@ -159,7 +166,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     // Kling V1.5 reference settings
                     klingReferenceMode: node.klingReferenceMode,
                     klingFaceIntensity: node.klingFaceIntensity,
-                    klingSubjectIntensity: node.klingSubjectIntensity
+                    klingSubjectIntensity: node.klingSubjectIntensity,
+                    signal: controller.signal
                 });
 
                 // Add cache-busting parameter to force browser to fetch new image
@@ -326,7 +334,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     motionReferenceUrl,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
                     nodeId: id,
-                    title: node.title || ''
+                    title: node.title || '',
+                    signal: controller.signal
                 });
 
                 // Add cache-busting parameter to force browser to fetch new video
@@ -366,6 +375,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
             }
         } catch (error: any) {
+            // 用户主动停止（中止请求）：复位为待生成，不当作失败，避免误导
+            if (error?.name === 'AbortError') {
+                updateNode(id, { status: NodeStatus.IDLE, generationStartTime: undefined, errorMessage: undefined });
+                console.log(`[Generation] 已停止生成节点 ${id}`);
+                return;
+            }
+
             // Handle errors
             const msg = error.toString().toLowerCase();
             let errorMessage = error.message || 'Generation failed';
@@ -378,6 +394,30 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
             updateNode(id, { status: NodeStatus.ERROR, errorMessage });
             console.error('Generation failed:', error);
+        } finally {
+            abortControllers.current.delete(id);
+        }
+    };
+
+    /**
+     * 停止所有在途生成：中止网络请求并清空控制器。
+     * 已发到下游的生成在服务端可能继续，但前端不再等待/写回，立即释放本地资源。
+     */
+    const cancelAllGenerations = (): number => {
+        const count = abortControllers.current.size;
+        abortControllers.current.forEach(c => {
+            try { c.abort(); } catch { /* ignore */ }
+        });
+        abortControllers.current.clear();
+        return count;
+    };
+
+    /** 停止单个节点的生成 */
+    const cancelGeneration = (id: string) => {
+        const c = abortControllers.current.get(id);
+        if (c) {
+            try { c.abort(); } catch { /* ignore */ }
+            abortControllers.current.delete(id);
         }
     };
 
@@ -386,6 +426,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
     // ============================================================================
 
     return {
-        handleGenerate
+        handleGenerate,
+        cancelAllGenerations,
+        cancelGeneration
     };
 };
