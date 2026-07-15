@@ -3,6 +3,7 @@ import {
     Check, Clock, FileText, Film, Image as ImageIcon, Loader2, Mic2,
     Pencil, Save, Sparkles, Trash2, Upload, Wand2, X,
 } from 'lucide-react';
+import { fetchJsonWithRetry } from '../../utils/fetchJsonWithRetry';
 
 export interface 产品DNA {
     productName: string;
@@ -212,9 +213,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
 
     const loadTemplates = async (preferredId?: string) => {
         try {
-            const response = await fetch('/api/product-templates');
-            const data = await response.json();
-            if (!response.ok) throw new Error(data?.error || '模板加载失败');
+            const data = await fetchJsonWithRetry('/api/product-templates');
             if (!Array.isArray(data) || data.length === 0) throw new Error('暂无可用的产品模板');
             const normalized: ProductTemplate[] = data.map((item: ProductTemplate) => ({
                 ...item,
@@ -222,6 +221,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                 conceptPrompt: item.conceptPrompt || '',
                 shotPrompt: item.shotPrompt || '',
             }));
+            setError('');
             setTemplates(normalized);
             applyTemplate(normalized.find(item => item.id === preferredId)
                 || normalized.find(item => item.id === templateId)
