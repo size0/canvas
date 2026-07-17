@@ -43,34 +43,106 @@ export interface GenerateVideoParams {
 /**
  * Generates an image by calling the backend API
  */
-export const generateImage = async (params: GenerateImageParams): Promise<string> => {
-  try {
-    const { signal, ...rawBody } = params;
-    // 长提示词不再截断，仅做空白规范化
-    const body = {
-      ...rawBody,
-      prompt: limitPrompt(rawBody.prompt),
-    };
-    const response = await fetch('/api/generate-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal
+const waitFor = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
+  if (signal?.aborted) {
+    reject(new DOMException('The operation was aborted.', 'AbortError'));
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    signal?.removeEventListener('abort', onAbort);
+    resolve();
+  }, ms);
+  const onAbort = () => {
+    clearTimeout(timer);
+    reject(new DOMException('The operation was aborted.', 'AbortError'));
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
+
+const recoverMediaResult = async (
+  nodeId: string,
+  signal?: AbortSignal,
+  timeoutMs = 12 * 60 * 1000,
+): Promise<string | null> => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    const response = await fetch('/api/generation-status/' + encodeURIComponent(nodeId), {
+      signal,
+      cache: 'no-store',
     });
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      if (data.status === 'success' && data.resultUrl) return data.resultUrl;
+      // pending = 服务端还在跑，继续等；stale 也先等一会儿，避免刚提交时误判
+    }
+    await waitFor(4000, signal);
+  }
+  return null;
+};
+
+const isRecoverableFailure = (error: unknown, response?: Response): boolean => {
+  const msg = String((error as any)?.message || error || '');
+  if (response && [502, 503, 504].includes(response.status)) return true;
+  return /timeout|timed?\s*out|i\/o timeout|network|fetch failed|proxy|gateway|ECONNRESET|aborted|Failed to fetch/i.test(msg);
+};
+
+export const generateImage = async (params: GenerateImageParams): Promise<string> => {
+  const { signal, ...rawBody } = params;
+  // 长提示词不再截断，仅做空白规范化
+  const body = {
+    ...rawBody,
+    prompt: limitPrompt(rawBody.prompt),
+  };
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal
+      });
+    } catch (error) {
+      // 代理/浏览器断开时，服务端可能仍在生成并已写入 nodeId 结果
+      if (rawBody.nodeId && isRecoverableFailure(error)) {
+        const recovered = await recoverMediaResult(rawBody.nodeId, signal);
+        if (recovered) return recovered;
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || response.statusText);
+      const message = errData.error || response.statusText || 'Image generation failed';
+      if (rawBody.nodeId && isRecoverableFailure(message, response)) {
+        const recovered = await recoverMediaResult(rawBody.nodeId, signal);
+        if (recovered) return recovered;
+      }
+      throw new Error(message);
     }
 
     const data = await response.json();
     if (!data.resultUrl) {
-      throw new Error("No image data returned from server");
+      if (rawBody.nodeId) {
+        const recovered = await recoverMediaResult(rawBody.nodeId, signal, 60_000);
+        if (recovered) return recovered;
+      }
+      throw new Error('No image data returned from server');
     }
     return data.resultUrl;
 
   } catch (error) {
-    console.error("Image Generation Error:", error);
+    console.error('Image Generation Error:', error);
+    // 最后再捞一次：上游已出图、本机已落盘，但 HTTP 响应丢了
+    if (rawBody.nodeId && isRecoverableFailure(error)) {
+      try {
+        const recovered = await recoverMediaResult(rawBody.nodeId, signal, 90_000);
+        if (recovered) return recovered;
+      } catch { /* ignore */ }
+    }
     throw error;
   }
 };
@@ -117,50 +189,14 @@ const responseErrorMessage = async (response: Response): Promise<string> => {
   return raw.slice(0, 500);
 };
 
-const waitFor = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
-  if (signal?.aborted) {
-    reject(new DOMException('The operation was aborted.', 'AbortError'));
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    signal?.removeEventListener('abort', onAbort);
-    resolve();
-  }, ms);
-  const onAbort = () => {
-    clearTimeout(timer);
-    reject(new DOMException('The operation was aborted.', 'AbortError'));
-  };
-  signal?.addEventListener('abort', onAbort, { once: true });
-});
-
 const recoverVideoResult = async (
   nodeId: string,
   signal?: AbortSignal,
   timeoutMs = 15 * 60 * 1000,
-): Promise<string | null> => {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const response = await fetch('/api/generation-status/' + encodeURIComponent(nodeId), {
-      signal,
-      cache: 'no-store',
-    });
-    if (response.ok) {
-      const data = await response.json().catch(() => ({}));
-      if (data.status === 'success' && data.resultUrl) return data.resultUrl;
-      if (data.status === 'stale') return null;
-    }
-
-    await waitFor(5000, signal);
-  }
-
-  return null;
-};
+): Promise<string | null> => recoverMediaResult(nodeId, signal, timeoutMs);
 
 const isRecoverableProxyFailure = (response: Response, message: string): boolean => (
-  [502, 503, 504].includes(response.status)
-  || /proxy|gateway|timed?\s*out|timeout|upstream/i.test(message)
+  isRecoverableFailure(message, response)
 );
 
 /**

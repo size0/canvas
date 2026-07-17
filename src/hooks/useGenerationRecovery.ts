@@ -68,11 +68,12 @@ export const useGenerationRecovery = ({
                     // 请求可能还没到服务器，60 秒内不判定中断。
                     const node = nodesRef.current.find(n => n.id === nodeId);
                     const startedAt = node?.generationStartTime;
-                    if (!startedAt || Date.now() - startedAt > 60000) {
+                    // 长图/视频任务：代理超时后服务端可能仍在写盘，放宽到 15 分钟再判中断
+                    if (!startedAt || Date.now() - startedAt > 15 * 60 * 1000) {
                         console.log(`[Recovery] Node ${nodeId} generation was interrupted (app restart)`);
                         updateNode(nodeId, {
                             status: NodeStatus.ERROR,
-                            errorMessage: '生成已中断（应用关闭/重启），请点击重试或使用批量生成',
+                            errorMessage: '生成已中断或超时未取回结果，请点击重试（若上游已出图会自动捞回）',
                             generationStartTime: undefined,
                         });
                     }
@@ -103,7 +104,7 @@ export const useGenerationRecovery = ({
 
         checkAll(); // Initial check
 
-        const interval = setInterval(checkAll, 10000); // Check every 10s
+        const interval = setInterval(checkAll, 5000); // 更勤轮询，便于捞回「上游已出图但 HTTP 断了」的结果
 
         return () => clearInterval(interval);
     }, [loadingNodeIds, checkStatus]); // Stable string dependency instead of nodes array

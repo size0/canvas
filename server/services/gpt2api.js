@@ -431,13 +431,20 @@ async function pollTask(pollUrl, apiKey, { timeoutMs = 600000 } = {}) {
     }
 }
 
-async function downloadToBuffer(url, { retries = 3 } = {}) {
+async function downloadToBuffer(url, { retries = 3, apiKey } = {}) {
     let lastErr;
+    const headers = {};
+    // gpt2api 结果 CDN 偶发需要鉴权；带上 KEY 更稳
+    if (apiKey && /gpt2api\.com/i.test(String(url))) {
+        headers.Authorization = `Bearer ${apiKey}`;
+    }
     for (let i = 0; i <= retries; i++) {
         try {
-            const resp = await fetch(url);
+            const resp = await fetch(url, { headers });
             if (!resp.ok) throw new Error(`下载生成结果失败 (HTTP ${resp.status})`);
-            return Buffer.from(await resp.arrayBuffer());
+            const buf = Buffer.from(await resp.arrayBuffer());
+            if (buf.length < 32) throw new Error('下载生成结果过小，可能不是有效图片/视频');
+            return buf;
         } catch (e) {
             lastErr = e;
             if (i < retries) await sleep(2000 * (i + 1));
@@ -572,11 +579,13 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
 
     // 有参考图用 /images/edits，否则 /images/generations
     const endpoint = hasRef ? `${requestBase}/images/edits` : `${requestBase}/images/generations`;
+    // 同一请求全程复用幂等键，避免超时重试时上游重复出图却丢结果
+    const idempotencyKey = makeIdempotencyKey('img');
 
     return withUpstreamRetry(async () => {
         const res = await fetch(endpoint, {
             method: 'POST',
-            headers: authHeaders(apiKey, { idempotencyKey: makeIdempotencyKey('img') }),
+            headers: authHeaders(apiKey, { idempotencyKey }),
             body: JSON.stringify(body),
         });
         const data = await res.json().catch(() => ({}));
@@ -587,27 +596,45 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
 
         // 同步返回：直接取结果
         let item = extractSyncItem(data);
+        const taskId = data.task_id || data.id;
         if (!item) {
             const nestedTask = extractNestedAsyncTask(data, requestBase);
             if (nestedTask) {
                 console.log('[gpt2api] Async image task created:', nestedTask.id || nestedTask.statusUrl);
-                item = await pollNestedAsyncImageTask(nestedTask, requestBase, apiKey, { timeoutMs: 300000 });
+                item = await pollNestedAsyncImageTask(nestedTask, requestBase, apiKey, { timeoutMs: 600000 });
             } else {
                 // Keep compatibility with legacy top-level task_id responses.
-                const taskId = data.task_id || data.id;
                 if (!taskId) throw new Error('Image API returned neither a result nor task_id');
-                item = await pollTask(`${requestBase}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+                item = await pollTask(`${requestBase}/images/generations/${taskId}`, apiKey, { timeoutMs: 600000 });
             }
         }
 
         if (item.buffer) return { buffer: item.buffer, format: item.format || 'png' };
         if (item.url) {
-            const buffer = await downloadToBuffer(item.url);
-            const format = item.url.includes('.jpg') || item.url.includes('.jpeg') ? 'jpg' : 'png';
-            return { buffer, format };
+            // 结果 URL 形如 https://www.gpt2api.com/api/v1/m/xxx.png —— 带 KEY 下载更稳
+            const candidates = [item.url];
+            if (taskId) {
+                const origin = requestBase.replace(/\/v\d+.*$/, '').replace(/\/+$/, '');
+                candidates.push(`${origin}/api/v1/gen/assets/${taskId}/0.png`);
+                candidates.push(`${origin}/api/v1/gen/cached/generated/${taskId}_0.png`);
+            }
+            let lastDlErr;
+            for (const url of [...new Set(candidates.filter(Boolean))]) {
+                try {
+                    const buffer = await downloadToBuffer(url, { retries: 2, apiKey });
+                    const format = /\.jpe?g(\?|$)/i.test(url) ? 'jpg' : 'png';
+                    console.log(`[gpt2api] 图像结果已下载: ${url.slice(0, 80)}… (${buffer.length} bytes)`);
+                    return { buffer, format };
+                } catch (e) {
+                    lastDlErr = e;
+                    console.warn(`[gpt2api] 图像下载失败 (${url}):`, e.message || e);
+                }
+            }
+            throw lastDlErr || new Error('图像结果下载失败');
         }
         // 兼容 b64_json 形式
-        return { buffer: Buffer.from(item.b64_json, 'base64'), format: 'png' };
+        if (item.b64_json) return { buffer: Buffer.from(item.b64_json, 'base64'), format: 'png' };
+        throw new Error('gpt2api 图像结果既无 url 也无 b64_json');
     }, { retries: 2, label: 'gpt2api-image' });
 }
 
