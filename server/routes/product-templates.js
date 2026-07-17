@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import { BUILTIN_KIDS_PRODUCT_TEMPLATES } from '../../shared/kidsProductTemplates.js';
 
 const router = express.Router();
 
@@ -121,6 +122,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '高端时尚品牌 Campaign 质感，自然窗光或大面积柔光塑造立体轮廓，35mm 环境人像结合 85mm 细节焦段感，面料垂坠、针脚、皮革纹理与五金反射真实，肤色和商品颜色准确，造型简洁有编辑感，款式版型、图案、扣件和细节工艺始终一致',
         ['不得虚构材质成分、产地、设计师联名或奢侈品牌关系'],
     ),
+    ...BUILTIN_KIDS_PRODUCT_TEMPLATES,
     makeTemplate(
         'builtin-local-store',
         '本地生活/门店',

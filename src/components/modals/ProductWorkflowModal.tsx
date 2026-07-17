@@ -4,6 +4,7 @@ import {
     Pencil, Save, Sparkles, Trash2, Upload, Wand2, X,
 } from 'lucide-react';
 import { fetchJsonWithRetry } from '../../utils/fetchJsonWithRetry';
+import { mergeBuiltinKidsProductTemplates } from '../../../shared/kidsProductTemplates.js';
 
 export interface 产品DNA {
     productName: string;
@@ -215,7 +216,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         try {
             const data = await fetchJsonWithRetry('/api/product-templates');
             if (!Array.isArray(data) || data.length === 0) throw new Error('暂无可用的产品模板');
-            const normalized: ProductTemplate[] = data.map((item: ProductTemplate) => ({
+            const normalized: ProductTemplate[] = mergeBuiltinKidsProductTemplates(data).map((item: ProductTemplate) => ({
                 ...item,
                 dnaPrompt: item.dnaPrompt || item.analyzePrompt || '',
                 conceptPrompt: item.conceptPrompt || '',
