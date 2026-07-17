@@ -53,6 +53,23 @@ function authHeaders(apiKey) {
 }
 
 /** 轮询一个异步任务直到完成，返回 result.data[0]（含绝对 url） */
+function isAirelvoSyncBase(base) {
+    try {
+        const url = new URL(base);
+        return url.hostname.toLowerCase() === 'airelvo.cc' && url.pathname.replace(/\/+$/, '') === '/v1';
+    } catch {
+        return false;
+    }
+}
+
+function shouldUseAirelvoAsync({ prompt, hasRef, resolution }) {
+    return hasRef || resolution === '4K' || String(prompt || '').length > 4000;
+}
+
+function toAirelvoAsyncBase(base) {
+    return base.replace(/\/+$/, '') + '/async';
+}
+
 async function pollTask(pollUrl, apiKey, { timeoutMs = 600000 } = {}) {
     const start = Date.now();
     let interval = 3000;
@@ -225,13 +242,21 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     const refs = (imageBase64Array || []).map(toImageInput).filter(Boolean);
     const hasRef = refs.length > 0;
 
+    const airelvoSync = isAirelvoSyncBase(base);
+    const routeThroughAsync = airelvoSync && shouldUseAirelvoAsync({ prompt, hasRef, resolution });
+    const requestBase = routeThroughAsync ? toAirelvoAsyncBase(base) : base;
+    const useAsyncRequest = routeThroughAsync || !airelvoSync;
+    if (routeThroughAsync) {
+        console.log('[gpt2api] Routing heavy Airelvo request through async queue');
+    }
+
     const body = {
         model,
         prompt: prompt || '',
         n: 1,
         size: RATIO_TO_SIZE[aspectRatio] || '1024x1024',
         quality: RES_TO_IMAGE_QUALITY[resolution] || '1k',
-        async: true,
+        async: useAsyncRequest,
     };
     if (hasRef) {
         if (refs.length === 1) body.image = refs[0];
@@ -239,7 +264,7 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     }
 
     // 有参考图用 /images/edits，否则 /images/generations
-    const endpoint = hasRef ? `${base}/images/edits` : `${base}/images/generations`;
+    const endpoint = hasRef ? `${requestBase}/images/edits` : `${requestBase}/images/generations`;
 
     const res = await fetch(endpoint, { method: 'POST', headers: authHeaders(apiKey), body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
@@ -248,15 +273,15 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     // 同步返回：直接取结果
     let item = extractSyncItem(data);
     if (!item) {
-        const nestedTask = extractNestedAsyncTask(data, base);
+        const nestedTask = extractNestedAsyncTask(data, requestBase);
         if (nestedTask) {
             console.log('[gpt2api] Async image task created:', nestedTask.id || nestedTask.statusUrl);
-            item = await pollNestedAsyncImageTask(nestedTask, base, apiKey, { timeoutMs: 300000 });
+            item = await pollNestedAsyncImageTask(nestedTask, requestBase, apiKey, { timeoutMs: 300000 });
         } else {
             // Keep compatibility with legacy top-level task_id responses.
             const taskId = data.task_id || data.id;
             if (!taskId) throw new Error('Image API returned neither a result nor task_id');
-            item = await pollTask(`${base}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+            item = await pollTask(`${requestBase}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
         }
     }
 

@@ -37,6 +37,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { extractVideoLastFrame } from './utils/videoHelpers';
+import { fetchJsonWithRetry } from './utils/fetchJsonWithRetry.js';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -670,7 +671,7 @@ export default function App() {
   const genConcurrencyRef = useRef(3);
   const refreshGenConcurrency = React.useCallback(async () => {
     try {
-      const data = await fetch('/api/settings').then(r => r.json());
+      const data = await fetchJsonWithRetry('/api/settings');
       const v = parseInt(data?.settings?.GEN_CONCURRENCY, 10);
       genConcurrencyRef.current = Number.isFinite(v) ? Math.min(20, Math.max(1, v)) : 3;
     } catch { /* 读取失败时沿用当前值 */ }

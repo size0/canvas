@@ -10,6 +10,104 @@ function jsonResponse(body, status = 200, headers = {}) {
     });
 }
 
+
+test('keeps light Airelvo requests on the configured sync endpoint', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        calls.push({
+            url: String(url),
+            method: options.method || 'GET',
+            body: options.body ? JSON.parse(options.body) : null,
+        });
+        if (calls.length === 1) {
+            return jsonResponse({ data: [{ url: 'https://cdn.example/light.png' }] });
+        }
+        return new Response(Uint8Array.from([7, 8, 9]), {
+            status: 200,
+            headers: { 'Content-Type': 'image/png' },
+        });
+    };
+
+    try {
+        const result = await generateGpt2apiImage({
+            prompt: 'a small product photo',
+            imageBase64Array: [],
+            aspectRatio: '1:1',
+            resolution: '1K',
+            model: 'gpt-image-2',
+            baseUrl: 'https://airelvo.cc/v1',
+            apiKey: 'test-key',
+        });
+
+        assert.equal(calls[0].url, 'https://airelvo.cc/v1/images/generations');
+        assert.equal(calls[0].body.async, false);
+        assert.equal(calls[1].url, 'https://cdn.example/light.png');
+        assert.deepEqual([...result.buffer], [7, 8, 9]);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
+test('routes heavy Airelvo sync requests through its async queue', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        calls.push({
+            url: String(url),
+            method: options.method || 'GET',
+            body: options.body ? JSON.parse(options.body) : null,
+        });
+        if (calls.length === 1) {
+            return jsonResponse({
+                data: {
+                    id: 'heavy-1',
+                    status: 'queued',
+                    status_url: 'https://airelvo.cc/v1/async/images/heavy-1',
+                },
+            }, 201);
+        }
+        if (calls.length === 2) {
+            return jsonResponse({
+                data: {
+                    id: 'heavy-1',
+                    status: 'succeeded',
+                    status_url: 'https://airelvo.cc/v1/async/images/heavy-1',
+                    result_url: 'https://airelvo.cc/v1/async/images/heavy-1/result',
+                },
+            });
+        }
+        if (calls.length === 3) {
+            return new Response(Uint8Array.from([10, 11, 12]), {
+                status: 200,
+                headers: { 'Content-Type': 'image/png' },
+            });
+        }
+        throw new Error(`unexpected request: ${url}`);
+    };
+
+    try {
+        const result = await generateGpt2apiImage({
+            prompt: 'a detailed product storyboard',
+            imageBase64Array: ['https://img.example/reference.jpg'],
+            aspectRatio: '9:16',
+            resolution: '4K',
+            model: 'gpt-image-2',
+            baseUrl: 'https://airelvo.cc/v1',
+            apiKey: 'test-key',
+        });
+
+        assert.equal(calls[0].url, 'https://airelvo.cc/v1/async/images/edits');
+        assert.equal(calls[0].body.async, true);
+        assert.equal(calls[0].body.image, 'https://img.example/reference.jpg');
+        assert.equal(calls[1].url, 'https://airelvo.cc/v1/async/images/heavy-1');
+        assert.equal(calls[2].url, 'https://airelvo.cc/v1/async/images/heavy-1/result');
+        assert.deepEqual([...result.buffer], [10, 11, 12]);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
 test('uses Airelvo nested task data and its status/result URLs', async () => {
     const calls = [];
     const originalFetch = global.fetch;

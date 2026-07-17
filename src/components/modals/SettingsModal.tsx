@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Loader2, X, Eye, EyeOff } from 'lucide-react';
+import { fetchJsonWithRetry } from '../../utils/fetchJsonWithRetry.js';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -90,8 +91,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setError(null);
         setSavedTip(false);
         setLoading(true);
-        fetch('/api/settings')
-            .then(res => res.json())
+        fetchJsonWithRetry('/api/settings')
             .then(data => {
                 if (data && data.settings) setValues(data.settings);
             })
