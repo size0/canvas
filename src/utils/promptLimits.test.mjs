@@ -20,6 +20,7 @@ test('limits ordinary prompts while preserving both the opening and final constr
   assert.match(limited, /^开头产品锚点/);
   assert.match(limited, /结尾负面约束：禁止变形和文字乱码$/);
 });
+
 test('builds a storyboard prompt without embedding every full image prompt', () => {
   const shots = Array.from({ length: 8 }, (_, index) => ({
     startSec: index * 2,
@@ -74,6 +75,7 @@ test('builds a compact video timeline with every shot and one product anchor', (
   });
 
   assert.ok(prompt.length <= VIDEO_PROMPT_MAX_CHARS);
+  assert.ok(prompt.length <= 3000, `video prompt too long: ${prompt.length}`);
   assert.doesNotMatch(prompt, /不应嵌入的完整视频提示词/);
   assert.match(prompt, /镜头 1/);
   assert.match(prompt, /镜头 8/);

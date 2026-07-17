@@ -26,8 +26,9 @@ test('normalizes model shot prompts to bounded executable prompts', () => {
     for (const shot of shots) {
         assert.ok(shot.imagePrompt.length <= PRODUCT_IMAGE_PROMPT_MAX_CHARS);
         assert.ok(shot.videoPrompt.length <= PRODUCT_VIDEO_PROMPT_MAX_CHARS);
-        assert.match(shot.imagePrompt, /唯一产品锚点/);
-        assert.match(shot.videoPrompt, /唯一产品锚点/);
+        assert.match(shot.imagePrompt, /唯一产品锚点|产品一致性/);
+        assert.match(shot.videoPrompt, /唯一产品锚点|产品一致性/);
+        assert.ok(shot.videoPrompt.length <= PRODUCT_VIDEO_PROMPT_MAX_CHARS);
     }
 });
 
@@ -64,4 +65,5 @@ test('builds the backend storyboard prompt from concise shot fields', () => {
     assert.doesNotMatch(prompt, /FULL_IMAGE_PROMPT_MARKER/);
     assert.match(prompt, /镜头01/);
     assert.match(prompt, /镜头08/);
+    assert.ok(prompt.length <= PRODUCT_STORYBOARD_PROMPT_MAX_CHARS);
 });

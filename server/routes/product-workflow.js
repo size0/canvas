@@ -79,7 +79,7 @@ function normalizeProductDNA(raw, input) {
             consistencyAnchor: cleanString(
                 visual.consistencyAnchor || source?.consistencyAnchor,
                 `${input.productName || '商品'}，外观、包装、主色、材质、比例和可见标识严格以参考图为准`,
-                800,
+                600,
             ),
         },
         confirmedSellingPoints: cleanList(source?.confirmedSellingPoints || source?.sellingPoints || input.sellingPoints, 12),
@@ -191,8 +191,8 @@ function normalizeShots(raw, concepts, options) {
             const item = candidates[shotIndex] && typeof candidates[shotIndex] === 'object'
                 ? candidates[shotIndex]
                 : {};
-            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 2500);
-            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 3000);
+            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 1800);
+            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 1600);
             if (!HAN.test(imagePrompt)) imagePrompt = `中文广告画面：${imagePrompt}`;
             if (!HAN.test(videoPrompt)) videoPrompt = `中文视频镜头：${videoPrompt}`;
             ({ imagePrompt, videoPrompt } = compactProductShotPrompts({
@@ -308,7 +308,7 @@ router.post('/analyze', async (req, res) => {
         sellingPoints: cleanList(body.sellingPoints, 20),
     };
     const prompts = body.prompts && typeof body.prompts === 'object' ? body.prompts : {};
-    const styleAnchor = cleanString(body.styleAnchor, template.styleAnchor, 1500);
+    const styleAnchor = cleanString(body.styleAnchor, template.styleAnchor, 800);
     const complianceRules = cleanList(prompts.complianceRules || template.complianceRules, 30);
     const analyzeSystem = promptValue(prompts, 'analyze', 'analyzePrompt', template.analyzePrompt);
     const conceptSystem = promptValue(prompts, 'concept', 'conceptPrompt', template.conceptPrompt);
@@ -340,7 +340,7 @@ router.post('/analyze', async (req, res) => {
       "materials": ["可见材质"],
       "packaging": "包装结构、标签布局和辨识特征",
       "visibleText": ["图片中确实可辨认的文字"],
-      "consistencyAnchor": "供后续每个镜头复用的完整视觉一致性描述"
+      "consistencyAnchor": "供后续复用的视觉一致性描述（建议 80～200 字，够用即可）"
     },
     "confirmedSellingPoints": ["图片或用户资料可支持的卖点"],
     "targetAudience": ["目标受众"],
@@ -414,20 +414,18 @@ JSON：
 
 强制要求：
 1. 所有提示词、字幕、旁白和转场均用中文。
-2. 每个镜头都必须重复产品视觉一致性锚点；商品包装、主色、材质、尺寸比例、标签位置和可见标识不得漂移。
-3. imagePrompt 按“产品锚点→镜头职责→场景→景别/机位/焦段感→构图与主体位置→光线色温→材质细节→画幅与字幕安全区→负面约束”的顺序书写。
-4. videoPrompt 按“产品锚点→起始状态→主体动作→单一运镜→速度节奏→结束状态→连续性→负面约束”的顺序书写。一个镜头只使用一种主运镜，禁止同时推拉摇移环绕。
-5. 整条 ${videoDuration} 秒成片必须有足够但不过载的动作过程；关键帧之间在空间、光线、人物、道具和产品状态上连续。
-6. 每张关键帧的字幕只承载一个重点，建议不超过 16 个汉字；整条旁白约 ${Math.max(8, Math.floor(videoDuration * 3.5))}～${Math.ceil(videoDuration * 4)} 个汉字，并与关键帧序列同步。
-7. 每套分镜至少包含一次商品完整 Hero Shot 和一次能够证明卖点的特写/使用镜头；相邻镜头必须在景别、角度或运动中至少改变两项。
-8. 不得生成图片中没有的品牌背书、参数、功效、价格、优惠或认证。
-9. shots 是同一条视频的连续关键帧，不是相互独立的小视频。各帧必须有开始—发展—收束关系，并保持本创意的场景世界、色彩和光线连续。
-10. 不同 concept 必须使用明显不同的布景、构图体系、光线策略、道具组合和叙事节奏；禁止只改变手势或轻微角度后重复同一张产品摆拍。
+2. 每个镜头都要保证商品一致；包装、主色、材质、比例、标签位置不得漂移。
+3. imagePrompt 建议 200～450 字：产品锚点可简要引用 + 镜头职责 + 场景 + 景别机位 + 构图 + 光线 + 材质；不要把同一段 DNA 原样复制五六遍。
+4. videoPrompt 建议 150～350 字：起始→一个动作→一种运镜→结束→衔接；禁止同时推拉摇移环绕。
+5. 关键帧连续，相邻镜至少改变景别、角度或运动中的两项。
+6. 字幕建议不超过 16 字；旁白与画面同步。
+7. 不得虚构认证、功效、价格、优惠。
+8. 不同 concept 布景与节奏要明显不同。
 
-输出前在内部逐镜检查：商品是否一致、提示词是否可执行、动作是否适配时长、旁白是否匹配画面、镜头是否重复、负面约束是否完整。只输出严格 JSON。`,
+只输出严格 JSON。`,
             prompt: `请为每套创意生成恰好 ${shotsPerConcept} 张连续关键帧，并以这些关键帧直接生成一条约 ${videoDuration} 秒的完整视频。
 固定时间轴：${timelineSpec}
-每张关键帧必须覆盖自己的 startSec 到 endSec，不得合并、遗漏或改变顺序。每段 voiceover 最多为该段秒数 × 4 个汉字，整条旁白总长度不得超过 ${Math.ceil(videoDuration * 4)} 个汉字。
+每张关键帧覆盖自己的 startSec 到 endSec。每段 voiceover 大约按该段秒数 × 4 个汉字估算。
 平台：${platform}
 画幅：${aspectRatio}
 风格锚点：${styleAnchor}
@@ -437,8 +435,8 @@ JSON：
 创意：${JSON.stringify(concepts)}
 
 输出：
-{"concepts":[{"id":"concept-1","shots":[{"index":1,"startSec":0,"endSec":2,"shotPurpose":"该时间段的叙事职责","scene":"具体场景与空间层次","shotSize":"景别","camera":"机位、角度与焦段感","composition":"构图与主体位置","action":"该时间段内完成的主体动作","imagePrompt":"完整专业中文生图提示词，含一致性锚点和负面约束","videoPrompt":"当前时间段及到下一关键帧的动作与运镜提示词","duration":2,"subtitle":"不超过12字的单一重点字幕","voiceover":"符合该段时长的自然中文旁白","transition":"具体视觉衔接方式"}]}]}`,
-            maxTokens: Math.min(30000, 5000 + conceptCount * shotsPerConcept * 900),
+{"concepts":[{"id":"concept-1","shots":[{"index":1,"startSec":0,"endSec":2,"shotPurpose":"该时间段的叙事职责","scene":"具体场景与空间层次","shotSize":"景别","camera":"机位、角度与焦段感","composition":"构图与主体位置","action":"该时间段内完成的主体动作","imagePrompt":"专业中文生图提示词（建议200-450字）","videoPrompt":"动作与运镜提示词（建议150-350字）","duration":2,"subtitle":"不超过12-16字的单一重点字幕","voiceover":"符合该段时长的自然中文旁白","transition":"具体视觉衔接方式"}]}]}`,
+            maxTokens: Math.min(28000, 5000 + conceptCount * shotsPerConcept * 700),
             temperature: 0.45,
             onDelta: (_delta, total) => {
                 if (total % 500 < 30) send({ type: 'progress', stage: 3, chars: total });
