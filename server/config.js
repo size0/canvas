@@ -51,7 +51,8 @@ export const DEFAULTS = {
     // 统一下游推荐 grok-imagine-video（6/10/20/30 秒分档）；xai/ 前缀走官方 xAI 参数格式
     VIDEO_MODEL: 'grok-imagine-video',
     ASR_MODEL: 'whisper-1',
-    GEN_CONCURRENCY: '3',
+    // gpt2api 出站并发建议 2；过高易只跑 1 路、其余 i/o timeout
+    GEN_CONCURRENCY: '2',
 };
 
 /**

@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { lookup as lookupDns } from 'node:dns/promises';
 import sharp from 'sharp';
+import { getKey } from '../config.js';
 
 /**
  * gpt2api.js
@@ -11,6 +12,35 @@ import sharp from 'sharp';
  * 接入地址形如 https://www.gpt2api.com/v1
  * 鉴权：Authorization: Bearer sk-xxx
  */
+
+// —— 出站并发槽：前端可同时点多个「生成」，但打向上游的请求有上限 ——
+// gpt2api 多并发时经常只跑 1 个，其余 i/o timeout；这里排队而不是一窝蜂冲。
+let outboundInFlight = 0;
+const outboundWaiters = [];
+
+function getOutboundLimit() {
+    const v = parseInt(getKey('GEN_CONCURRENCY'), 10);
+    // 至少 1；最多 3 路打向上游（再高 gpt-image-2 很容易超时）
+    if (!Number.isFinite(v) || v < 1) return 2;
+    return Math.min(3, Math.max(1, v));
+}
+
+async function withOutboundSlot(fn, label = 'job') {
+    const limit = getOutboundLimit();
+    while (outboundInFlight >= limit) {
+        await new Promise((resolve) => outboundWaiters.push(resolve));
+    }
+    outboundInFlight += 1;
+    console.log(`[gpt2api] 出站占用 ${label}: ${outboundInFlight}/${limit}（排队等待 ${outboundWaiters.length}）`);
+    try {
+        return await fn();
+    } finally {
+        outboundInFlight = Math.max(0, outboundInFlight - 1);
+        const next = outboundWaiters.shift();
+        if (next) next();
+        console.log(`[gpt2api] 出站释放 ${label}: 剩余占用 ${outboundInFlight}/${getOutboundLimit()}`);
+    }
+}
 
 // gpt2api 提供的模型 ID（用于在生成路由里判断走哪个提供商）
 export const GPT2API_IMAGE_MODELS = ['nano-banana-pro', 'nano-banana-v2', 'nano-banana', 'gpt-image-2'];
@@ -548,6 +578,13 @@ async function pollNestedAsyncImageTask(initialTask, base, apiKey, { timeoutMs =
  */
 export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRatio, resolution, model, baseUrl, apiKey, resolveDns = lookupDns }) {
     if (!apiKey) throw new Error('未配置 gpt2api API Key（请在「设置」中填写）');
+    // 多个节点同时点生成时，在这里排队，避免上游只跑 1 个、其余超时
+    return withOutboundSlot(() => generateGpt2apiImageInner({
+        prompt, imageBase64Array, aspectRatio, resolution, model, baseUrl, apiKey, resolveDns,
+    }), 'image');
+}
+
+async function generateGpt2apiImageInner({ prompt, imageBase64Array, aspectRatio, resolution, model, baseUrl, apiKey, resolveDns = lookupDns }) {
     const base = (baseUrl || 'https://www.gpt2api.com/v1').replace(/\/+$/, '');
 
     const refs = (imageBase64Array || []).map(toImageInput).filter(Boolean);
@@ -824,6 +861,12 @@ async function downloadVideoItem(base, item, taskId) {
  */
 export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase64, referenceImages, aspectRatio, resolution, duration, model, baseUrl, apiKey }) {
     if (!apiKey) throw new Error('未配置 gpt2api API Key（请在「设置」中填写）');
+    return withOutboundSlot(() => generateGpt2apiVideoInner({
+        prompt, imageBase64, lastFrameBase64, referenceImages, aspectRatio, resolution, duration, model, baseUrl, apiKey,
+    }), 'video');
+}
+
+async function generateGpt2apiVideoInner({ prompt, imageBase64, lastFrameBase64, referenceImages, aspectRatio, resolution, duration, model, baseUrl, apiKey }) {
     const base = (baseUrl || 'https://www.gpt2api.com/v1').replace(/\/+$/, '');
 
     const isGrokVideo = isGrokImagineVideoModel(model);

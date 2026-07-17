@@ -68,7 +68,7 @@ const GROUPS: GroupDef[] = [
         title: '生成设置',
         desc: '批量生成与一键创作的调度参数。',
         fields: [
-            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '3', hint: '同时进行的生图/生视频任务数，1-20。过大可能触发接口限流或导致预览加载失败，建议 3-8' },
+            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '2', hint: '同时打向上游的生图/生视频路数（1–3 有效）。gpt2api 多路并发时经常只跑 1 个、其余超时；建议 2。前端可同时点多个节点，服务端会排队' },
         ],
     },
 ];
