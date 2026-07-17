@@ -1,3 +1,11 @@
+import {
+  IMAGE_PROMPT_MAX_CHARS,
+  SINGLE_VIDEO_PROMPT_MAX_CHARS,
+  STORYBOARD_PROMPT_MAX_CHARS,
+  VIDEO_PROMPT_MAX_CHARS,
+  limitPrompt,
+} from '../utils/promptLimits.ts';
+
 /**
  * generationService.ts
  * 
@@ -43,7 +51,14 @@ export interface GenerateVideoParams {
  */
 export const generateImage = async (params: GenerateImageParams): Promise<string> => {
   try {
-    const { signal, ...body } = params;
+    const { signal, ...rawBody } = params;
+    const promptLimit = /故事板|storyboard/i.test(rawBody.title || '')
+      ? STORYBOARD_PROMPT_MAX_CHARS
+      : IMAGE_PROMPT_MAX_CHARS;
+    const body = {
+      ...rawBody,
+      prompt: limitPrompt(rawBody.prompt, promptLimit),
+    };
     const response = await fetch('/api/generate-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -168,6 +183,12 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<string
     : rawBody.videoModel;
   const body = {
     ...rawBody,
+    prompt: limitPrompt(
+      rawBody.prompt,
+      (rawBody.referenceImages?.length || 0) > 1
+        ? VIDEO_PROMPT_MAX_CHARS
+        : SINGLE_VIDEO_PROMPT_MAX_CHARS,
+    ),
     videoModel: normalizedVideoModel,
     duration: normalizeVideoDuration(rawBody.duration, normalizedVideoModel),
     resolution: normalizeVideoResolution(rawBody.resolution),

@@ -1,7 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { generateVideo } from './generationService.ts';
+import { generateImage, generateVideo } from './generationService.ts';
+import {
+  IMAGE_PROMPT_MAX_CHARS,
+  SINGLE_VIDEO_PROMPT_MAX_CHARS,
+  STORYBOARD_PROMPT_MAX_CHARS,
+} from '../utils/promptLimits.ts';
+
+test('enforces prompt limits at the final image and video request boundary', async () => {
+  const originalFetch = global.fetch;
+  const sentBodies = [];
+
+  global.fetch = async (_url, options = {}) => {
+    sentBodies.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ resultUrl: '/library/test-output' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    await generateImage({ prompt: '图'.repeat(9000), title: '普通图片' });
+    await generateImage({ prompt: '板'.repeat(9000), title: '故事板 01' });
+    await generateVideo({ prompt: '视'.repeat(9000), duration: 10 });
+
+    assert.ok(sentBodies[0].prompt.length <= IMAGE_PROMPT_MAX_CHARS);
+    assert.ok(sentBodies[1].prompt.length <= STORYBOARD_PROMPT_MAX_CHARS);
+    assert.ok(sentBodies[2].prompt.length <= SINGLE_VIDEO_PROMPT_MAX_CHARS);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
 
 test('normalizes a saved mixed-contract node at the final request boundary', async () => {
   const originalFetch = global.fetch;

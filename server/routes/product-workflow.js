@@ -5,6 +5,10 @@ import express from 'express';
 import { jsonrepair } from 'jsonrepair';
 import { getKey } from '../config.js';
 import { multimodalChat, textChat } from '../utils/multimodal-chat.js';
+import {
+    buildCompactBackendStoryboardPrompt,
+    compactProductShotPrompts,
+} from '../utils/product-prompt-limits.js';
 import { BUILTIN_PRODUCT_TEMPLATES, findProductTemplate } from './product-templates.js';
 
 const router = express.Router();
@@ -191,16 +195,15 @@ function normalizeShots(raw, concepts, options) {
             let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 3000);
             if (!HAN.test(imagePrompt)) imagePrompt = `中文广告画面：${imagePrompt}`;
             if (!HAN.test(videoPrompt)) videoPrompt = `中文视频镜头：${videoPrompt}`;
-            // 无论模型是否主动遵守，都把视觉一致性锚点写入每一个生成提示词。
-            if (!imagePrompt.includes(options.consistencyAnchor)) {
-                imagePrompt = `${options.styleAnchor}，${options.consistencyAnchor}。${imagePrompt}`;
-            }
-            if (concept.visualDirection && !imagePrompt.includes(concept.visualDirection)) {
-                imagePrompt = `本创意独立视觉导演方案：${concept.visualDirection}。场景世界：${concept.sceneWorld}。色彩灯光：${concept.colorLighting}。${imagePrompt}`;
-            }
-            if (!videoPrompt.includes(options.consistencyAnchor)) {
-                videoPrompt = `${options.consistencyAnchor}。${videoPrompt}`;
-            }
+            ({ imagePrompt, videoPrompt } = compactProductShotPrompts({
+                imagePrompt,
+                videoPrompt,
+                consistencyAnchor: options.consistencyAnchor,
+                styleAnchor: options.styleAnchor,
+                visualDirection: concept.visualDirection,
+                sceneWorld: concept.sceneWorld,
+                colorLighting: concept.colorLighting,
+            }));
             const startSec = shotIndex * 2;
             const endSec = Math.min(options.videoDuration, startSec + 2);
             const beatDuration = durationForShot(options.videoDuration, shotIndex);
@@ -450,7 +453,7 @@ JSON：
             consistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
         }).map(concept => ({
             ...concept,
-            storyboardPrompt: buildStoryboardBoardPrompt(concept, {
+            storyboardPrompt: buildCompactBackendStoryboardPrompt(concept, {
                 videoDuration,
                 aspectRatio,
                 industry: template.industry,

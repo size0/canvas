@@ -15,6 +15,10 @@ import { LayoutGrid, RotateCcw, Square } from 'lucide-react';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeStatus, NodeType } from './types';
 import { generateImage, generateVideo } from './services/generationService';
+import {
+  buildCompactProductStoryboardPrompt,
+  buildCompactProductVideoPrompt,
+} from './utils/promptLimits';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
 import { useConnectionDragging } from './hooks/useConnectionDragging';
@@ -1200,14 +1204,18 @@ export default function App() {
         title: `故事板 ${nn} · ${concept.shots?.length || opts.shotsPerConcept} 格 / ${ratio} / ${storyboardResolution}`,
         x: 0,
         y: 0,
-        prompt: concept.storyboardPrompt || [
-          `生成一张 ${storyboardResolution}、${ratio} 画幅专业广告故事板大图，母版方向与最终视频完全一致，不是单帧海报。`,
-          `故事板包含 ${concept.shots?.length || opts.shotsPerConcept} 个按时间顺序排列的 ${ratio} 成片构图画格。`,
-          `${consistencyAnchor}。`,
-          ...(concept.shots || []).map((shot, index) =>
-            `镜头${String(index + 1).padStart(2, '0')} ${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(videoDuration, index * 2 + 2)}秒：${shot.imagePrompt}`
-          ),
-        ].filter(Boolean).join('\n'),
+        prompt: buildCompactProductStoryboardPrompt({
+          title: concept.title,
+          productName,
+          industry: opts.industry || result.productDNA?.category || '通用电商',
+          videoDuration,
+          aspectRatio: ratio,
+          consistencyAnchor,
+          visualDirection: concept.visualDirection,
+          sceneWorld: concept.sceneWorld,
+          colorLighting: concept.colorLighting,
+          shots: concept.shots || [],
+        }),
         aspectRatio: ratio,
         resolution: storyboardResolution,
         parentIds: [directionNode.id, ...productNodes.map(node => node.id)],
@@ -1231,18 +1239,16 @@ export default function App() {
         title: `成片 ${nn} · ${concept.title || '广告方案'}`,
         x: 0,
         y: 0,
-        prompt: [
-          `${consistencyAnchor}。`,
-          concept.visualDirection ? `【视觉导演】${concept.visualDirection}` : '',
-          concept.rhythm ? `【整体节奏】${concept.rhythm}` : '',
-          `第一张参考图是一张包含 ${concept.shots?.length || opts.shotsPerConcept} 格的完整故事板母版，请严格按画格编号和时间码演绎为一条 ${videoDuration} 秒广告。后续参考图是产品原图，仅用于锁定产品外观。`,
-          ...(concept.shots || []).map((shot, index) =>
-            `【${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(videoDuration, index * 2 + 2)}秒｜镜头 ${index + 1}】${shot.videoPrompt || shot.action || shot.shotPurpose || '自然连续过渡'}`
-          ),
-          opts.generateVoiceover && combinedVoiceover ? `【完整中文口播】${combinedVoiceover}` : '',
-          opts.generateSubtitles && combinedSubtitle ? `【字幕文案】${combinedSubtitle}` : '',
-          '商品外观、包装结构、颜色、材质、比例、Logo 和可见文字全程不得漂移；禁止闪烁、跳切、产品变形和重复生成。',
-        ].filter(Boolean).join('\n'),
+        prompt: buildCompactProductVideoPrompt({
+          productName,
+          videoDuration,
+          consistencyAnchor,
+          visualDirection: concept.visualDirection,
+          rhythm: concept.rhythm,
+          voiceover: opts.generateVoiceover ? combinedVoiceover : '',
+          subtitles: opts.generateSubtitles ? combinedSubtitle : '',
+          shots: concept.shots || [],
+        }),
         parentIds: [storyboardNode.id, ...productNodes.map(node => node.id)],
         productReferenceUrls: productImages,
         videoDuration,
