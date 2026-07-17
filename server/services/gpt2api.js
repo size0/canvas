@@ -78,6 +78,28 @@ const VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 中转站 Docker 内部偶发 i/o timeout / 网关断开，可重试 */
+function isRetryableUpstreamError(err) {
+    const msg = String(err?.message || err || '');
+    return /i\/o timeout|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed|network|超时|gateway|502|503|504/i.test(msg);
+}
+
+async function withUpstreamRetry(fn, { retries = 2, label = 'gpt2api' } = {}) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await fn(attempt);
+        } catch (e) {
+            lastErr = e;
+            if (attempt >= retries || !isRetryableUpstreamError(e)) throw e;
+            const waitMs = 1500 * (attempt + 1);
+            console.warn(`[${label}] 上游瞬时失败，${waitMs}ms 后重试 (${attempt + 1}/${retries}):`, e.message || e);
+            await sleep(waitMs);
+        }
+    }
+    throw lastErr;
+}
+
 function makeIdempotencyKey(prefix = 'gen') {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         return `${prefix}-${crypto.randomUUID()}`;
@@ -551,37 +573,42 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     // 有参考图用 /images/edits，否则 /images/generations
     const endpoint = hasRef ? `${requestBase}/images/edits` : `${requestBase}/images/generations`;
 
-    const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: authHeaders(apiKey, { idempotencyKey: makeIdempotencyKey('img') }),
-        body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error?.message || data?.error || `图像请求失败 (HTTP ${res.status})`);
-
-    // 同步返回：直接取结果
-    let item = extractSyncItem(data);
-    if (!item) {
-        const nestedTask = extractNestedAsyncTask(data, requestBase);
-        if (nestedTask) {
-            console.log('[gpt2api] Async image task created:', nestedTask.id || nestedTask.statusUrl);
-            item = await pollNestedAsyncImageTask(nestedTask, requestBase, apiKey, { timeoutMs: 300000 });
-        } else {
-            // Keep compatibility with legacy top-level task_id responses.
-            const taskId = data.task_id || data.id;
-            if (!taskId) throw new Error('Image API returned neither a result nor task_id');
-            item = await pollTask(`${requestBase}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+    return withUpstreamRetry(async () => {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: authHeaders(apiKey, { idempotencyKey: makeIdempotencyKey('img') }),
+            body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const msg = data?.error?.message || data?.error || `图像请求失败 (HTTP ${res.status})`;
+            throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
         }
-    }
 
-    if (item.buffer) return { buffer: item.buffer, format: item.format || 'png' };
-    if (item.url) {
-        const buffer = await downloadToBuffer(item.url);
-        const format = item.url.includes('.jpg') || item.url.includes('.jpeg') ? 'jpg' : 'png';
-        return { buffer, format };
-    }
-    // 兼容 b64_json 形式
-    return { buffer: Buffer.from(item.b64_json, 'base64'), format: 'png' };
+        // 同步返回：直接取结果
+        let item = extractSyncItem(data);
+        if (!item) {
+            const nestedTask = extractNestedAsyncTask(data, requestBase);
+            if (nestedTask) {
+                console.log('[gpt2api] Async image task created:', nestedTask.id || nestedTask.statusUrl);
+                item = await pollNestedAsyncImageTask(nestedTask, requestBase, apiKey, { timeoutMs: 300000 });
+            } else {
+                // Keep compatibility with legacy top-level task_id responses.
+                const taskId = data.task_id || data.id;
+                if (!taskId) throw new Error('Image API returned neither a result nor task_id');
+                item = await pollTask(`${requestBase}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+            }
+        }
+
+        if (item.buffer) return { buffer: item.buffer, format: item.format || 'png' };
+        if (item.url) {
+            const buffer = await downloadToBuffer(item.url);
+            const format = item.url.includes('.jpg') || item.url.includes('.jpeg') ? 'jpg' : 'png';
+            return { buffer, format };
+        }
+        // 兼容 b64_json 形式
+        return { buffer: Buffer.from(item.b64_json, 'base64'), format: 'png' };
+    }, { retries: 2, label: 'gpt2api-image' });
 }
 
 /** 从任务结果项解析秒数（兼容 duration_ms / duration） */
@@ -826,7 +853,10 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
 
     let submitted;
     try {
-        submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+        submitted = await withUpstreamRetry(
+            () => submitAndPollVideoTask(base, apiKey, '/video/generations', body),
+            { retries: 2, label: 'gpt2api-video' },
+        );
     } catch (firstErr) {
         const msg = String(firstErr.message || firstErr);
         if ((Array.isArray(body.images) || Array.isArray(body.reference_images))
@@ -837,12 +867,18 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
             delete body.operation;
             if (useOfficialXai) body.image = { url: refs[0] };
             else body.image = refs[0];
-            submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+            submitted = await withUpstreamRetry(
+                () => submitAndPollVideoTask(base, apiKey, '/video/generations', body),
+                { retries: 1, label: 'gpt2api-video-fallback' },
+            );
         } else if (useOfficialXai && body.image && typeof body.image === 'object'
             && /image|unknown field|unsupported|invalid parameter|参数/i.test(msg)) {
             console.warn('[gpt2api] 官方 image 对象格式被拒，回退字符串: ' + msg);
             body.image = refs[0];
-            submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+            submitted = await withUpstreamRetry(
+                () => submitAndPollVideoTask(base, apiKey, '/video/generations', body),
+                { retries: 1, label: 'gpt2api-video-fallback' },
+            );
         } else {
             throw firstErr;
         }
