@@ -1,5 +1,6 @@
 import net from 'node:net';
 import { lookup as lookupDns } from 'node:dns/promises';
+import sharp from 'sharp';
 
 /**
  * gpt2api.js
@@ -40,12 +41,17 @@ export function normalizeGpt2apiVideoDuration(duration, model) {
 }
 
 export function resolveGpt2apiVideoModel(requestedModel, configuredModel) {
-    const normalizeAlias = model => model === 'xai/grok-imagine-video' ? 'grok-imagine-video' : model;
-    const requested = normalizeAlias(requestedModel);
-    const configured = normalizeAlias(configuredModel);
+    // 保留 xai/grok-imagine-video 与 grok-imagine-video 两个 ID：
+    // 前者走官方 xAI 参数格式，后者走 gpt2api 统一下游格式。
+    const requested = String(requestedModel || '').trim();
+    const configured = String(configuredModel || '').trim();
     if (isGpt2apiVideoModel(requested)) return requested;
     if (isGpt2apiVideoModel(configured)) return configured;
     return 'grok-imagine-video';
+}
+
+export function isOfficialXaiVideoModel(model) {
+    return String(model || '').startsWith('xai/');
 }
 
 // 宽高比 → 基准像素尺寸（gpt2api 会按 quality 档自动放大到精确尺寸）
@@ -65,10 +71,19 @@ const RATIO_TO_SIZE = {
 
 // 图像分辨率档 → quality
 const RES_TO_IMAGE_QUALITY = { '1K': '1k', '2K': '2k', '4K': '4k' };
-// 视频分辨率 → quality
+// 统一下游视频分辨率 → quality（hd=720p / fullhd=1080p）
 const RES_TO_VIDEO_QUALITY = { '720p': 'hd', '1080p': 'fullhd' };
+// 官方 xAI / 统一接口均接受的 resolution 字面值
+const VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function makeIdempotencyKey(prefix = 'gen') {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `${prefix}-${crypto.randomUUID()}`;
+    }
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /** 确保为 data URL（gpt2api 接受 data:image/...;base64,... 或公网 URL） */
 function toImageInput(value) {
@@ -78,11 +93,118 @@ function toImageInput(value) {
     return `data:image/png;base64,${value}`;
 }
 
-function authHeaders(apiKey) {
-    return {
+/** 画幅字符串 → 宽/高 */
+const VIDEO_ASPECT_VALUE = {
+    '1:1': 1,
+    '16:9': 16 / 9,
+    '9:16': 9 / 16,
+    '4:3': 4 / 3,
+    '3:4': 3 / 4,
+    '3:2': 3 / 2,
+    '2:3': 2 / 3,
+};
+
+/**
+ * 把参考图等比缩放到目标画幅画布内（letterbox，不拉伸）。
+ * 图生视频若强制 9:16 但参考图是 3:4，上游常会非等比拉伸 → 人物被拉高。
+ */
+export async function letterboxImageToAspect(imageInput, aspectLabel, {
+    maxLongSide = 1280,
+    background = { r: 0, g: 0, b: 0, alpha: 1 },
+} = {}) {
+    const input = toImageInput(imageInput);
+    if (!input) return null;
+    const targetRatio = VIDEO_ASPECT_VALUE[aspectLabel];
+    if (!targetRatio) return input;
+
+    let buffer;
+    if (input.startsWith('data:')) {
+        const m = input.match(/^data:[^;]+;base64,(.+)$/);
+        if (!m) return input;
+        buffer = Buffer.from(m[1], 'base64');
+    } else if (input.startsWith('http://') || input.startsWith('https://')) {
+        const res = await fetch(input, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MagicalCanvas/1.0)' },
+        });
+        if (!res.ok) {
+            console.warn(`[gpt2api] letterbox: 下载参考图失败 HTTP ${res.status}，跳过适配`);
+            return input;
+        }
+        buffer = Buffer.from(await res.arrayBuffer());
+    } else {
+        return input;
+    }
+
+    const meta = await sharp(buffer).metadata();
+    const srcW = meta.width || 0;
+    const srcH = meta.height || 0;
+    if (!srcW || !srcH) return input;
+
+    const srcRatio = srcW / srcH;
+    // 与目标接近则不处理（避免无意义重编码）
+    if (Math.abs(srcRatio - targetRatio) / targetRatio < 0.03) {
+        return input;
+    }
+
+    // 输出画布：长边不超过 maxLongSide，且贴合目标比例
+    let outW;
+    let outH;
+    if (targetRatio >= 1) {
+        outW = maxLongSide;
+        outH = Math.round(outW / targetRatio);
+    } else {
+        outH = maxLongSide;
+        outW = Math.round(outH * targetRatio);
+    }
+    // 16 对齐，部分视频管线更稳
+    outW = Math.max(16, Math.round(outW / 16) * 16);
+    outH = Math.max(16, Math.round(outH / 16) * 16);
+
+    console.warn(
+        `[gpt2api] 参考图 ${srcW}x${srcH}(≈${srcRatio.toFixed(3)}) → letterbox ${outW}x${outH}(${aspectLabel})，避免非等比拉伸`,
+    );
+
+    const fitted = await sharp(buffer)
+        .resize(outW, outH, {
+            fit: 'contain',
+            background,
+            withoutEnlargement: false,
+        })
+        .png()
+        .toBuffer();
+
+    return `data:image/png;base64,${fitted.toString('base64')}`;
+}
+
+async function letterboxRefsForVideo(refs, aspectRatio) {
+    if (!refs?.length) return refs;
+    if (!aspectRatio || aspectRatio === 'Auto' || !VIDEO_ASPECT_VALUE[aspectRatio]) return refs;
+    const out = [];
+    for (const ref of refs) {
+        try {
+            out.push(await letterboxImageToAspect(ref, aspectRatio));
+        } catch (e) {
+            console.warn('[gpt2api] letterbox 失败，使用原图:', e.message || e);
+            out.push(ref);
+        }
+    }
+    return out;
+}
+
+function authHeaders(apiKey, { idempotencyKey } = {}) {
+    const headers = {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
     };
+    // 图片/视频建议带 Idempotency-Key，避免网络重试导致重复扣费
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    return headers;
+}
+
+function normalizeVideoResolution(resolution) {
+    const normalized = String(resolution || '').toLowerCase();
+    if (VIDEO_RESOLUTIONS.has(normalized)) return normalized;
+    return '720p';
 }
 
 /** 轮询一个异步任务直到完成，返回 result.data[0]（含绝对 url） */
@@ -429,7 +551,11 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     // 有参考图用 /images/edits，否则 /images/generations
     const endpoint = hasRef ? `${requestBase}/images/edits` : `${requestBase}/images/generations`;
 
-    const res = await fetch(endpoint, { method: 'POST', headers: authHeaders(apiKey), body: JSON.stringify(body) });
+    const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: authHeaders(apiKey, { idempotencyKey: makeIdempotencyKey('img') }),
+        body: JSON.stringify(body),
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error?.message || data?.error || `图像请求失败 (HTTP ${res.status})`);
 
@@ -458,57 +584,161 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     return { buffer: Buffer.from(item.b64_json, 'base64'), format: 'png' };
 }
 
+/** 从任务结果项解析秒数（兼容 duration_ms / duration） */
+function itemDurationSeconds(item) {
+    if (!item || typeof item !== 'object') return null;
+    if (Number.isFinite(item.duration_ms) && item.duration_ms > 0) return item.duration_ms / 1000;
+    if (Number.isFinite(item.duration) && item.duration > 0) {
+        // 部分上游把秒写成 15，部分写成 15000
+        return item.duration > 1000 ? item.duration / 1000 : item.duration;
+    }
+    return null;
+}
+
+/** 官方 xAI 单段生成上限 15 秒；超过部分必须走 extensions 续写 */
+const GROK_NATIVE_MAX_SECONDS = 15;
+const GROK_EXTEND_MAX_SECONDS = 15;
+
+function isGrokImagineVideoModel(model) {
+    return /(?:^|\/)grok-imagine-video$/i.test(String(model || ''));
+}
+
 /**
- * 视频生成（文生视频 / 图生视频）。返回 Buffer(mp4)。
+ * 提交异步视频任务并轮询到完成，返回 { item, taskId }。
+ * endpoint 形如 /video/generations 或 /videos/extensions。
  */
-export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase64, referenceImages, aspectRatio, resolution, duration, model, baseUrl, apiKey }) {
-    if (!apiKey) throw new Error('未配置 gpt2api API Key（请在「设置」中填写）');
-    const base = (baseUrl || 'https://www.gpt2api.com/v1').replace(/\/+$/, '');
-
-    const isGrokVideo = /(?:^|\/)grok-imagine-video$/i.test(String(model || ''));
-    const refs = Array.from(new Set([
-        ...(Array.isArray(referenceImages) ? referenceImages : []),
-        imageBase64,
-        lastFrameBase64,
-    ].map(toImageInput).filter(Boolean))).slice(0, 8);
-    const body = {
-        model,
-        prompt: prompt || '',
-        duration: normalizeGpt2apiVideoDuration(duration, model),
-        async: true,
-    };
-    if (aspectRatio && aspectRatio !== 'Auto') body.ratio = aspectRatio;
-    if (resolution && RES_TO_VIDEO_QUALITY[resolution]) body.quality = RES_TO_VIDEO_QUALITY[resolution];
-    if (refs.length === 1) body.image = refs[0];
-    else if (refs.length > 1 && isGrokVideo) body.images = refs;
-    else if (refs.length > 1) body.image = refs[0];
-
-    let res = await fetch(`${base}/video/generations`, { method: 'POST', headers: authHeaders(apiKey), body: JSON.stringify(body) });
-    let data = await res.json().catch(() => ({}));
-    const errorText = String(data?.error?.message || data?.error || '');
-    if (!res.ok && Array.isArray(body.images) && /images|unknown field|unsupported|invalid parameter|参数/i.test(errorText)) {
-        console.warn(`[gpt2api] 多图视频参数被上游拒绝，回退首张关键帧: ${errorText}`);
-        delete body.images;
-        body.image = refs[0];
-        res = await fetch(`${base}/video/generations`, { method: 'POST', headers: authHeaders(apiKey), body: JSON.stringify(body) });
-        data = await res.json().catch(() => ({}));
-    }
-    if (!res.ok) throw new Error(data?.error?.message || data?.error || `视频请求失败 (HTTP ${res.status})`);
-
-    const taskId = data.task_id || data.id;
-    let item = extractSyncItem(data);
-    if (!item) {
-        if (!taskId) throw new Error('视频接口未返回结果或 task_id');
-        item = await pollTask(`${base}/video/generations/${taskId}`, apiKey, { timeoutMs: 900000 });
+async function submitAndPollVideoTask(base, apiKey, endpoint, body, { timeoutMs = 900000 } = {}) {
+    const paths = endpoint.startsWith('/') ? [endpoint] : ['/' + endpoint];
+    // 单复数路径兼容
+    if (paths[0].includes('/video/') && !paths[0].includes('/videos/')) {
+        paths.push(paths[0].replace('/video/', '/videos/'));
+    } else if (paths[0].includes('/videos/')) {
+        paths.push(paths[0].replace('/videos/', '/video/'));
     }
 
-    // 中转站自带结果代理：/api/v1/gen/assets/{taskId}/0.mp4。
-    // grok-imagine-video 等模型的 result.url 是上游原始地址（assets.grok.com，
-    // 需要 grok.com 登录态，直接下载 403），但代理地址可以正常下载。
+    let lastError;
+    for (const path of paths) {
+        const res = await fetch(base + path, {
+            method: 'POST',
+            headers: authHeaders(apiKey, { idempotencyKey: makeIdempotencyKey('vid') }),
+            body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            lastError = new Error(data?.error?.message || data?.error || ('视频请求失败 (HTTP ' + res.status + ') @ ' + path));
+            continue;
+        }
+
+        const taskId = data.task_id || data.id || data.request_id;
+        let item = extractSyncItem(data);
+        if (!item) {
+            if (!taskId) {
+                lastError = new Error('视频接口未返回结果或 task_id @ ' + path);
+                continue;
+            }
+            const pollCandidates = [
+                base + path.replace(/\/$/, '') + '/' + taskId,
+                base + '/video/generations/' + taskId,
+                base + '/videos/generations/' + taskId,
+                base + '/videos/' + taskId,
+            ];
+            let pollErr;
+            for (const pollUrl of [...new Set(pollCandidates)]) {
+                try {
+                    item = await pollTask(pollUrl, apiKey, { timeoutMs });
+                    pollErr = null;
+                    break;
+                } catch (e) {
+                    pollErr = e;
+                }
+            }
+            if (!item) {
+                lastError = pollErr || new Error('视频任务轮询失败');
+                continue;
+            }
+        }
+        return { item, taskId, data };
+    }
+    throw lastError || new Error('视频请求失败');
+}
+
+/**
+ * 用 /videos/extensions 把短片续写到目标时长。
+ * duration 表示「追加」秒数，不是总时长（官方 xAI 约定）。
+ */
+async function extendVideoToTarget({
+    base, apiKey, model, prompt, videoUrl, currentSeconds, targetSeconds, useOfficialXai,
+}) {
+    let item = { url: videoUrl };
+    let seconds = currentSeconds;
+    let rounds = 0;
+    const maxRounds = 4;
+
+    while (seconds + 0.75 < targetSeconds && rounds < maxRounds) {
+        const remaining = Math.ceil(targetSeconds - seconds);
+        // 每次最多追加 15s；优先凑 10s 分档
+        let append = Math.min(GROK_EXTEND_MAX_SECONDS, Math.max(3, remaining));
+        if (remaining >= 10 && append > 10 && remaining !== 15) {
+            append = 10;
+        }
+
+        const extendPrompt = prompt
+            ? ('Continue seamlessly from the last frame. Keep the same subject, style, and motion. ' + prompt)
+            : 'Continue seamlessly from the last frame with consistent motion and style.';
+
+        const body = {
+            model,
+            prompt: extendPrompt,
+            duration: append,
+            async: true,
+        };
+        if (useOfficialXai) {
+            body.video = { url: item.url };
+        } else {
+            // 统一下游同时兼容 video 字符串与 video_url
+            body.video = item.url;
+            body.video_url = item.url;
+        }
+
+        console.log('[gpt2api] 视频扩展第 ' + (rounds + 1) + ' 次：当前约 ' + seconds.toFixed(1) + 's → 追加 ' + append + 's（目标 ' + targetSeconds + 's）');
+
+        let extended;
+        try {
+            extended = await submitAndPollVideoTask(base, apiKey, '/videos/extensions', body);
+        } catch (e) {
+            // 部分网关只认 video 对象
+            if (!useOfficialXai) {
+                body.video = { url: item.url };
+                delete body.video_url;
+                extended = await submitAndPollVideoTask(base, apiKey, '/videos/extensions', body);
+            } else {
+                throw e;
+            }
+        }
+
+        const next = extended.item;
+        if (!next?.url) throw new Error('视频扩展未返回 url');
+        const reported = itemDurationSeconds(next);
+        // 扩展结果应为「原片 + 追加」；若上游只回报追加段时长则累加
+        if (reported != null && reported >= seconds - 0.5) {
+            seconds = reported;
+        } else if (reported != null && reported > 0 && reported < seconds) {
+            seconds = seconds + reported;
+        } else {
+            seconds = seconds + append;
+        }
+        item = next;
+        rounds += 1;
+        console.log('[gpt2api] 扩展完成，估算时长 ' + seconds.toFixed(1) + 's');
+    }
+
+    return { item, seconds };
+}
+
+async function downloadVideoItem(base, item, taskId) {
     const origin = base.replace(/\/v\d+$/, '');
-    const proxyUrl = taskId ? `${origin}/api/v1/gen/assets/${taskId}/0.mp4` : null;
-    const preferProxy = String(item.url).includes('assets.grok.com');
-
+    const proxyUrl = taskId ? (origin + '/api/v1/gen/assets/' + taskId + '/0.mp4') : null;
+    const preferProxy = String(item.url || '').includes('assets.grok.com');
     const candidates = preferProxy
         ? [proxyUrl, item.url].filter(Boolean)
         : [item.url, proxyUrl].filter(Boolean);
@@ -519,10 +749,135 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
             return await downloadToBuffer(url, { retries: 1 });
         } catch (e) {
             lastErr = e;
-            console.warn(`[gpt2api] 视频下载失败 (${url})，尝试备用地址:`, e.message);
+            console.warn('[gpt2api] 视频下载失败 (' + url + ')，尝试备用地址:', e.message);
         }
     }
     throw lastErr || new Error('视频下载失败');
+}
+
+/**
+ * 视频生成（文生视频 / 图生视频）。返回 Buffer(mp4)。
+ *
+ * 时长分档（与 gpt2api 后台 model_prices 一致）：
+ * - grok-imagine-video / xai/grok-imagine-video：6 / 10 / 20 / 30 秒
+ *   · 官方 xAI 单段最长 15s；20/30 若中转未自动拼接，则本地用 /videos/extensions 续写
+ * - sora：4 / 8 / 12
+ * - veo3.1*：4 / 6 / 8
+ *
+ * 参数格式：
+ * - xai/* 官方路径：aspect_ratio + resolution + image:{url} / reference_images
+ * - 统一下游：ratio + quality(hd/fullhd) + image / images[]
+ */
+export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase64, referenceImages, aspectRatio, resolution, duration, model, baseUrl, apiKey }) {
+    if (!apiKey) throw new Error('未配置 gpt2api API Key（请在「设置」中填写）');
+    const base = (baseUrl || 'https://www.gpt2api.com/v1').replace(/\/+$/, '');
+
+    const isGrokVideo = isGrokImagineVideoModel(model);
+    const useOfficialXai = isOfficialXaiVideoModel(model);
+    const resolvedDuration = normalizeGpt2apiVideoDuration(duration, model);
+    const resolvedResolution = normalizeVideoResolution(resolution);
+    let refs = Array.from(new Set([
+        ...(Array.isArray(referenceImages) ? referenceImages : []),
+        imageBase64,
+        lastFrameBase64,
+    ].map(toImageInput).filter(Boolean))).slice(0, 8);
+
+    // 图生视频：参考图比例与成片比例不一致时先 letterbox，禁止上游非等比拉伸（人物被拉高）
+    // 例如尾帧 750x1000(3:4) + 成片 9:16 → 先垫成 9:16 再送
+    if (refs.length > 0 && aspectRatio && aspectRatio !== 'Auto') {
+        refs = await letterboxRefsForVideo(refs, aspectRatio);
+    }
+
+    // 官方 xAI 单段硬顶 15s。中转站虽写「20/30 自动拼接」，实测常只回 15s。
+    // 因此 Grok 超过 15s 时：首包最多 15s，不足部分本地走 /videos/extensions 续写。
+    const firstShotDuration = isGrokVideo
+        ? Math.min(resolvedDuration, GROK_NATIVE_MAX_SECONDS)
+        : resolvedDuration;
+
+    const body = {
+        model,
+        prompt: prompt || '',
+        duration: firstShotDuration,
+        async: true,
+    };
+
+    // 文生视频：传 ratio；图生视频在已 letterbox 后也传目标画幅，保证成片比例一致
+    // 若无参考图且 Auto，则不传 ratio（让上游默认）
+    if (useOfficialXai) {
+        if (aspectRatio && aspectRatio !== 'Auto') body.aspect_ratio = aspectRatio;
+        body.resolution = resolvedResolution;
+        if (refs.length > 1) {
+            body.operation = 'reference-to-video';
+            body.reference_images = refs.map(url => ({ url }));
+        } else if (refs.length === 1) {
+            body.image = { url: refs[0] };
+        }
+    } else {
+        if (aspectRatio && aspectRatio !== 'Auto') body.ratio = aspectRatio;
+        if (RES_TO_VIDEO_QUALITY[resolvedResolution]) {
+            body.quality = RES_TO_VIDEO_QUALITY[resolvedResolution];
+        } else if (resolvedResolution === '480p') {
+            body.resolution = '480p';
+        }
+        if (refs.length === 1) body.image = refs[0];
+        else if (refs.length > 1 && isGrokVideo) body.images = refs;
+        else if (refs.length > 1) body.image = refs[0];
+    }
+
+    let submitted;
+    try {
+        submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+    } catch (firstErr) {
+        const msg = String(firstErr.message || firstErr);
+        if ((Array.isArray(body.images) || Array.isArray(body.reference_images))
+            && /images|reference_images|unknown field|unsupported|invalid parameter|参数/i.test(msg)) {
+            console.warn('[gpt2api] 多图视频参数被上游拒绝，回退首张关键帧: ' + msg);
+            delete body.images;
+            delete body.reference_images;
+            delete body.operation;
+            if (useOfficialXai) body.image = { url: refs[0] };
+            else body.image = refs[0];
+            submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+        } else if (useOfficialXai && body.image && typeof body.image === 'object'
+            && /image|unknown field|unsupported|invalid parameter|参数/i.test(msg)) {
+            console.warn('[gpt2api] 官方 image 对象格式被拒，回退字符串: ' + msg);
+            body.image = refs[0];
+            submitted = await submitAndPollVideoTask(base, apiKey, '/video/generations', body);
+        } else {
+            throw firstErr;
+        }
+    }
+
+    let { item, taskId } = submitted;
+    if (!item?.url) throw new Error('视频接口未返回 url');
+
+    let actualSeconds = itemDurationSeconds(item);
+    if (actualSeconds == null) {
+        // 未回报时长时按首包请求值估算（Grok 首包已 cap 在 15s）
+        actualSeconds = firstShotDuration;
+    }
+
+    console.log('[gpt2api] 首段视频完成：请求 ' + resolvedDuration + 's，首包 ' + firstShotDuration + 's，回报/估算 ' + actualSeconds.toFixed(1) + 's');
+
+    // 目标明显更长 → 用 extensions 续写（修 30s 只拿到 15s 的问题）
+    if (isGrokVideo && actualSeconds + 0.75 < resolvedDuration) {
+        const extended = await extendVideoToTarget({
+            base,
+            apiKey,
+            model,
+            prompt: prompt || '',
+            videoUrl: item.url,
+            currentSeconds: actualSeconds,
+            targetSeconds: resolvedDuration,
+            useOfficialXai: useOfficialXai || isGrokVideo,
+        });
+        item = extended.item;
+        actualSeconds = extended.seconds;
+        taskId = null;
+        console.log('[gpt2api] 长视频扩展结束：目标 ' + resolvedDuration + 's，最终约 ' + actualSeconds.toFixed(1) + 's');
+    }
+
+    return downloadVideoItem(base, item, taskId);
 }
 
 /**

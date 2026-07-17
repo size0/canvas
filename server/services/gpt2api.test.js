@@ -30,12 +30,14 @@ test('normalizes video duration using each model contract', () => {
 
 test('resolves stale configured video models to a supported fallback', () => {
     assert.equal(resolveGpt2apiVideoModel('sora', 'veo3.1'), 'sora');
-    assert.equal(resolveGpt2apiVideoModel('xai/grok-imagine-video', null), 'grok-imagine-video');
+    // 保留 xai/ 前缀，走官方 xAI 参数格式
+    assert.equal(resolveGpt2apiVideoModel('xai/grok-imagine-video', null), 'xai/grok-imagine-video');
     assert.equal(resolveGpt2apiVideoModel('unknown-model', 'veo3.1'), 'veo3.1');
     assert.equal(
         resolveGpt2apiVideoModel(null, 'grok-imagine-video-1.5-fast'),
         'grok-imagine-video',
     );
+    assert.equal(resolveGpt2apiVideoModel(null, 'xai/grok-imagine-video'), 'xai/grok-imagine-video');
 });
 
 test('sends a normalized duration to the current GPT2API video endpoint', async () => {
@@ -46,6 +48,7 @@ test('sends a normalized duration to the current GPT2API video endpoint', async 
             url: String(url),
             method: options.method || 'GET',
             body: options.body ? JSON.parse(options.body) : null,
+            headers: options.headers || {},
         });
         if (calls.length === 1) return jsonResponse({ task_id: 'video-1' });
         if (calls.length === 2) {
@@ -65,18 +68,148 @@ test('sends a normalized duration to the current GPT2API video endpoint', async 
             prompt: 'animate the product',
             duration: 15,
             resolution: '720p',
+            aspectRatio: '16:9',
             model: 'grok-imagine-video',
             baseUrl: 'https://gateway.example/v1',
             apiKey: 'test-key',
         });
 
         assert.equal(calls[0].url, 'https://gateway.example/v1/video/generations');
+        // 15s 向下对齐到 Grok 分档 10s（合法：6/10/20/30）
         assert.equal(calls[0].body.duration, 10);
         assert.equal(calls[0].body.async, true);
         assert.equal(calls[0].body.quality, 'hd');
+        assert.equal(calls[0].body.ratio, '16:9');
+        assert.ok(calls[0].headers['Idempotency-Key']);
         assert.equal(calls[1].url, 'https://gateway.example/v1/video/generations/video-1');
         assert.equal(calls[2].url, 'https://cdn.example/video-1.mp4');
         assert.deepEqual([...result], [20, 21, 22]);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
+test('sends official xAI params for xai/grok-imagine-video', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    // 1x1 png — letterbox 可识别，且比例接近 1:1 不会改写
+    const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    global.fetch = async (url, options = {}) => {
+        calls.push({
+            url: String(url),
+            method: options.method || 'GET',
+            body: options.body ? JSON.parse(options.body) : null,
+        });
+        if (String(url).includes('/generations') && (options.method || 'GET') === 'POST') {
+            return jsonResponse({ task_id: 'xai-vid-1' });
+        }
+        if (String(url).includes('xai-vid-1')) {
+            return jsonResponse({
+                status: 'succeeded',
+                // 单段最长 15s（官方上限）
+                result: { data: [{ url: 'https://cdn.example/xai-1.mp4', duration_ms: 15000 }] },
+            });
+        }
+        // extensions 提交
+        if (String(url).includes('/extensions') && options.method === 'POST') {
+            return jsonResponse({ task_id: 'xai-ext-1' });
+        }
+        if (String(url).includes('xai-ext-1')) {
+            return jsonResponse({
+                status: 'succeeded',
+                result: { data: [{ url: 'https://cdn.example/xai-ext.mp4', duration_ms: 30000 }] },
+            });
+        }
+        return new Response(Uint8Array.from([1, 2, 3]), {
+            status: 200,
+            headers: { 'Content-Type': 'video/mp4' },
+        });
+    };
+
+    try {
+        await generateGpt2apiVideo({
+            prompt: 'Camera dolly-in',
+            duration: 30,
+            resolution: '480p',
+            aspectRatio: '16:9',
+            imageBase64: tinyPng,
+            model: 'xai/grok-imagine-video',
+            baseUrl: 'https://www.gpt2api.com/v1',
+            apiKey: 'test-key',
+        });
+
+        const genPost = calls.find(c => c.method === 'POST' && String(c.url).includes('/generations'));
+        // 首包被 cap 到 15s，不会傻传 30 给上游
+        assert.ok(genPost);
+        assert.equal(genPost.body.model, 'xai/grok-imagine-video');
+        assert.equal(genPost.body.duration, 15);
+        assert.equal(genPost.body.aspect_ratio, '16:9');
+        assert.equal(genPost.body.resolution, '480p');
+        assert.equal(genPost.body.ratio, undefined);
+        assert.equal(genPost.body.quality, undefined);
+        assert.ok(genPost.body.image?.url);
+
+        // 随后应调用 extensions 续写到 30s（剩余 15s 一次追加 15s）
+        const extendPost = calls.find(c => c.method === 'POST' && String(c.url).includes('/extensions'));
+        assert.ok(extendPost, 'should POST /videos/extensions for long Grok video');
+        assert.equal(extendPost.body.duration, 15);
+        assert.deepEqual(extendPost.body.video, { url: 'https://cdn.example/xai-1.mp4' });
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
+test('extends grok-imagine-video when first shot is shorter than 30s', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        const u = String(url);
+        const method = options.method || 'GET';
+        const body = options.body ? JSON.parse(options.body) : null;
+        calls.push({ url: u, method, body });
+
+        if (u.includes('.mp4')) {
+            return new Response(Uint8Array.from([9, 8, 7]), {
+                status: 200,
+                headers: { 'Content-Type': 'video/mp4' },
+            });
+        }
+        if (method === 'POST' && u.includes('/generations')) {
+            return jsonResponse({ task_id: 'g1' });
+        }
+        if (method === 'GET' && /\/g1$/.test(u)) {
+            return jsonResponse({
+                status: 'succeeded',
+                result: { data: [{ url: 'https://cdn.example/g1.mp4', duration_ms: 15000 }] },
+            });
+        }
+        if (method === 'POST' && u.includes('/extensions')) {
+            return jsonResponse({ task_id: 'e1' });
+        }
+        if (method === 'GET' && /\/e1$/.test(u)) {
+            return jsonResponse({
+                status: 'succeeded',
+                result: { data: [{ url: 'https://cdn.example/e1.mp4', duration_ms: 30000 }] },
+            });
+        }
+        return jsonResponse({ error: 'unexpected ' + method + ' ' + u }, 500);
+    };
+
+    try {
+        const result = await generateGpt2apiVideo({
+            prompt: 'drone flight',
+            duration: 30,
+            resolution: '720p',
+            model: 'grok-imagine-video',
+            baseUrl: 'https://gateway.example/v1',
+            apiKey: 'test-key',
+        });
+
+        assert.equal(calls[0].body.duration, 15); // 首段 cap 15
+        const extendPosts = calls.filter(c => c.method === 'POST' && c.url.includes('/extensions'));
+        assert.ok(extendPosts.length >= 1);
+        assert.equal(extendPosts[0].body.duration, 15); // 再追 15s → 共 30s
+        assert.deepEqual([...result], [9, 8, 7]);
     } finally {
         global.fetch = originalFetch;
     }

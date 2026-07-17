@@ -38,6 +38,7 @@ export const useNodeManagement = () => {
         const canvasX = (x - viewport.x) / viewport.zoom;
         const canvasY = (y - viewport.y) / viewport.zoom;
 
+        const isVideo = type === NodeType.VIDEO;
         const newNode: NodeData = {
             id: crypto.randomUUID(),
             type,
@@ -48,8 +49,10 @@ export const useNodeManagement = () => {
             model: 'Banana Pro',
             imageModel: 'nano-banana-pro',
             videoModel: 'grok-imagine-video',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
+            // Grok 统一下游时长分档：6 / 10 / 20 / 30 秒
+            videoDuration: isVideo ? 6 : undefined,
+            aspectRatio: isVideo ? '16:9' : 'Auto',
+            resolution: isVideo ? '720p' : 'Auto',
             parentIds: parentId ? [parentId] : []
         };
 
@@ -120,6 +123,11 @@ export const useNodeManagement = () => {
                 const GAP = 100;
                 const NODE_WIDTH = 340;
 
+                const isVideo = type === NodeType.VIDEO;
+                const videoDefaults = isVideo
+                    ? { videoModel: 'grok-imagine-video', videoDuration: 6, aspectRatio: '16:9', resolution: '720p' }
+                    : { aspectRatio: 'Auto', resolution: 'Auto' };
+
                 let newNode: NodeData;
 
                 if (direction === 'right') {
@@ -132,8 +140,7 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
+                        ...videoDefaults,
                         parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
                     };
                 } else {
@@ -146,8 +153,7 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
+                        ...videoDefaults,
                         parentIds: []
                     };
                     // Update source to add new node as parent

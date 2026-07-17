@@ -19,6 +19,7 @@ import storyWorkflowRoutes from './routes/story-workflow.js';
 import promptTemplatesRoutes from './routes/prompt-templates.js';
 import productWorkflowRoutes from './routes/product-workflow.js';
 import productTemplatesRoutes from './routes/product-templates.js';
+import digitalHumansRoutes from './routes/digital-humans.js';
 import { getKey, getAllSettings, saveConfig, SETTINGS_KEYS } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,6 +90,7 @@ for (const key of SETTINGS_KEYS) {
 app.locals.IMAGES_DIR = IMAGES_DIR;
 app.locals.VIDEOS_DIR = VIDEOS_DIR;
 app.locals.LIBRARY_DIR = LIBRARY_DIR;
+app.locals.LIBRARY_ASSETS_DIR = LIBRARY_ASSETS_DIR;
 
 // Mirror resolved settings into process.env so route/service modules that read
 // process.env directly (Twitter, TikTok, etc.) also pick up saved values live.
@@ -257,6 +259,7 @@ app.use('/api/story-workflow', storyWorkflowRoutes);
 app.use('/api/prompt-templates', promptTemplatesRoutes);
 app.use('/api/product-workflow', productWorkflowRoutes);
 app.use('/api/product-templates', productTemplatesRoutes);
+app.use('/api/digital-humans', digitalHumansRoutes);
 
 // NOTE: Old Kling helpers removed - now in server/services/kling.js
 
@@ -388,7 +391,7 @@ app.post('/api/library', async (req, res) => {
 });
 
 // ---- 素材分类管理（categories.json 持久化完整分类列表，全部可增删） ----
-const DEFAULT_CATEGORIES = ['Character', 'Scene', 'Item', 'Style', 'Sound Effect', 'Others'];
+const DEFAULT_CATEGORIES = ['Character', 'Digital Human', 'Scene', 'Item', 'Style', 'Sound Effect', 'Others'];
 const categoriesJsonPath = () => path.join(LIBRARY_ASSETS_DIR, 'categories.json');
 
 function loadCategories() {

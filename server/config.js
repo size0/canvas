@@ -48,7 +48,8 @@ export const DEFAULTS = {
     IMAGE_API_URL: 'https://www.gpt2api.com/v1',
     IMAGE_MODEL: 'nano-banana-pro',
     VIDEO_API_URL: 'https://www.gpt2api.com/v1',
-    VIDEO_MODEL: 'xai/grok-imagine-video',
+    // 统一下游推荐 grok-imagine-video（6/10/20/30 秒分档）；xai/ 前缀走官方 xAI 参数格式
+    VIDEO_MODEL: 'grok-imagine-video',
     ASR_MODEL: 'whisper-1',
     GEN_CONCURRENCY: '3',
 };

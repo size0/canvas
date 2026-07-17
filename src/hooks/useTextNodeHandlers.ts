@@ -47,8 +47,10 @@ export const useTextNodeHandlers = ({
             prompt: textNode.prompt || '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
+            videoModel: 'grok-imagine-video',
+            videoDuration: 6, // gpt2api Grok 分档：6 / 10 / 20 / 30
+            aspectRatio: '16:9',
+            resolution: '720p',
             parentIds: [nodeId]
         };
 

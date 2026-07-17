@@ -29,13 +29,14 @@ interface StoryboardVideoModalProps {
     };
 }
 
-// Video durations in seconds
-const VIDEO_DURATIONS = [4, 6, 8, 10, 12, 20, 30];
-const VIDEO_RESOLUTIONS = ["Auto", "1080p", "768p", "720p", "512p"];
+// 与 gpt2api 接口文档一致：Grok 仅 6/10/20/30，其它模型各自有分档
+const GROK_VIDEO_DURATIONS = [6, 10, 20, 30];
+const VIDEO_RESOLUTIONS = ["Auto", "1080p", "768p", "720p", "512p", "480p"];
 
 const VIDEO_MODELS = [
     // gpt2api.com 视频模型
-    { id: 'grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', recommended: true, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'] },
+    { id: 'grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', recommended: true, durations: GROK_VIDEO_DURATIONS, resolutions: ['480p', '720p', '1080p'] },
+    { id: 'xai/grok-imagine-video', name: 'Grok Imagine Video 1.5', provider: 'gpt2api', durations: GROK_VIDEO_DURATIONS, resolutions: ['480p', '720p', '1080p'] },
     { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
     { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },
     { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', durations: [4, 6, 8], resolutions: ['720p', '1080p'] },

@@ -72,13 +72,23 @@ export interface ProductWorkflowResult {
     styleAnchor?: string;
     templateId?: string;
     industry?: string;
+    talent?: DigitalHumanSelection | null;
     [key: string]: unknown;
 }
 
 export type ProductGenerationScope = 'nodes' | 'images' | 'videos' | 'final';
 
+export interface DigitalHumanSelection {
+    id?: string | null;
+    name: string;
+    coverUrl: string;
+    referenceImages: string[];
+    identityAnchor?: string;
+}
+
 export interface ProductWorkflowOptions {
     productImages: string[];
+    digitalHuman?: DigitalHumanSelection | null;
     templateId: string;
     aspectRatio: string;
     conceptCount: number;
@@ -154,6 +164,8 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
     const [sellingPoints, setSellingPoints] = useState('');
     const [productImageUrl, setProductImageUrl] = useState('');
     const [productImages, setProductImages] = useState<string[]>([]);
+    const [digitalHumans, setDigitalHumans] = useState<DigitalHumanSelection[]>([]);
+    const [selectedDigitalHuman, setSelectedDigitalHuman] = useState<DigitalHumanSelection | null>(null);
     const [recentImages, setRecentImages] = useState<{ id?: string; url: string; title?: string; prompt?: string }[]>([]);
     const [templates, setTemplates] = useState<ProductTemplate[]>([]);
     const [templateId, setTemplateId] = useState('');
@@ -169,12 +181,14 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
     const [generationScope, setGenerationScope] = useState<ProductGenerationScope>('final');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [uploadingTalent, setUploadingTalent] = useState(false);
     const [error, setError] = useState('');
     const [stage, setStage] = useState('');
     const [stageNo, setStageNo] = useState(0);
     const [chars, setChars] = useState(0);
     const [elapsed, setElapsed] = useState(0);
     const imageInputRef = useRef<HTMLInputElement>(null);
+    const talentInputRef = useRef<HTMLInputElement>(null);
     const promptInputRef = useRef<HTMLInputElement>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -232,9 +246,20 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         }
     };
 
+    const loadDigitalHumans = async () => {
+        try {
+            const response = await fetch('/api/digital-humans');
+            const data = await response.json().catch(() => []);
+            setDigitalHumans(Array.isArray(data) ? data : []);
+        } catch {
+            setDigitalHumans([]);
+        }
+    };
+
     useEffect(() => {
         if (isOpen && templates.length === 0) void loadTemplates();
         if (isOpen) {
+            void loadDigitalHumans();
             void fetch('/api/assets/images?limit=8')
                 .then(response => response.json())
                 .then(data => setRecentImages(Array.isArray(data) ? data : (Array.isArray(data?.assets) ? data.assets : [])))
@@ -242,6 +267,40 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
+
+    const handleTalentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setUploadingTalent(true);
+        setError('');
+        try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('读取图片失败'));
+                reader.readAsDataURL(file);
+            });
+            const name = file.name.replace(/\.[^.]+$/, '') || '数字人';
+            const response = await fetch('/api/digital-humans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    coverUrl: dataUrl,
+                    referenceImages: [dataUrl],
+                }),
+            });
+            const created = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(created?.error || '上传数字人失败');
+            await loadDigitalHumans();
+            setSelectedDigitalHuman(created);
+        } catch (err: any) {
+            setError(err?.message || '上传数字人失败');
+        } finally {
+            setUploadingTalent(false);
+        }
+    };
 
     useEffect(() => () => {
         if (timerRef.current) clearInterval(timerRef.current);
@@ -355,6 +414,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
 
         const opts: ProductWorkflowOptions = {
             productImages,
+            digitalHuman: selectedDigitalHuman,
             templateId,
             aspectRatio,
             conceptCount,
@@ -378,6 +438,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                     ...opts,
                     // 服务端的 multimodalChat 同时接受多张远程 URL、素材库 URL 与 data URL。
                     productImageUrls: productImages,
+                    digitalHuman: selectedDigitalHuman,
                     prompts: {
                         analyze: draft.dnaPrompt,
                         concept: draft.conceptPrompt,
@@ -469,10 +530,80 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                    {/* ① 数字人（可选，优先于产品参考图） */}
+                    <section className="rounded-xl border border-violet-500/20 bg-violet-500/[0.04] p-3.5">
+                        <div className="flex items-center justify-between mb-2">
+                            <label className={labelCls + ' mb-0'}>
+                                <Sparkles size={13} className="text-violet-300" />
+                                ① 选择数字人
+                                <span className="text-neutral-500 font-normal">（可选 · 出镜人物外貌以此为准）</span>
+                            </label>
+                            <div className="flex gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedDigitalHuman(null)}
+                                    disabled={loading || !selectedDigitalHuman}
+                                    className="px-2 py-1 rounded-md text-[11px] text-neutral-400 hover:text-white bg-white/[0.04] border border-white/[0.06] disabled:opacity-40"
+                                >
+                                    不使用数字人
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => talentInputRef.current?.click()}
+                                    disabled={loading || uploadingTalent}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-violet-200 border border-violet-500/30 hover:bg-violet-500/10 disabled:opacity-40"
+                                >
+                                    {uploadingTalent ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                                    上传新人
+                                </button>
+                                <input ref={talentInputRef} type="file" accept="image/*" className="hidden" onChange={handleTalentUpload} />
+                            </div>
+                        </div>
+                        {selectedDigitalHuman ? (
+                            <div className="flex items-center gap-3 rounded-lg border border-violet-500/40 bg-black/30 p-2">
+                                <img src={selectedDigitalHuman.coverUrl} alt="" className="w-14 h-14 rounded-lg object-cover border border-white/10" />
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-xs text-violet-100 font-medium truncate">{selectedDigitalHuman.name}</div>
+                                    <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
+                                        {selectedDigitalHuman.identityAnchor || '后续分镜/成片中人物外貌将锁定此数字人'}
+                                    </div>
+                                </div>
+                                <Check size={16} className="text-violet-300 shrink-0" />
+                            </div>
+                        ) : (
+                            <div className="text-[11px] text-neutral-500 mb-2">未选择时行为与原先一致；选择后全片人物以数字人为准，产品仍以产品图为准。</div>
+                        )}
+                        {digitalHumans.length > 0 && (
+                            <div className="flex gap-2 overflow-x-auto pt-2 pb-0.5">
+                                {digitalHumans.map(human => {
+                                    const selected = selectedDigitalHuman?.id === human.id
+                                        || selectedDigitalHuman?.coverUrl === human.coverUrl;
+                                    return (
+                                        <button
+                                            key={human.id || human.coverUrl}
+                                            type="button"
+                                            disabled={loading}
+                                            onClick={() => setSelectedDigitalHuman(human)}
+                                            title={human.name}
+                                            className={`relative w-16 shrink-0 rounded-lg overflow-hidden border transition-colors ${selected ? 'border-violet-400 ring-1 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/40'}`}
+                                        >
+                                            <img src={human.coverUrl} alt="" className="w-16 h-16 object-cover" />
+                                            <span className="block px-1 py-0.5 text-[9px] text-neutral-300 truncate bg-black/60">{human.name}</span>
+                                            {selected && <Check size={12} className="absolute right-1 top-1 text-violet-200" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {digitalHumans.length === 0 && !selectedDigitalHuman && (
+                            <div className="mt-1 text-[11px] text-neutral-600">数字人库为空。可点「上传新人」，或先在左侧素材库「数字人」分类入库。</div>
+                        )}
+                    </section>
+
                     <section className="grid grid-cols-[220px_1fr] gap-4">
                         <div>
                             <label className={labelCls}>
-                                <ImageIcon size={13} /> 产品参考图
+                                <ImageIcon size={13} /> ② 产品参考图
                                 <span className="ml-auto text-amber-300">{productImages.length}/6</span>
                             </label>
                             <button type="button" onClick={() => imageInputRef.current?.click()} disabled={loading}

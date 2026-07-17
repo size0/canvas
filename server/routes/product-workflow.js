@@ -191,14 +191,15 @@ function normalizeShots(raw, concepts, options) {
             const item = candidates[shotIndex] && typeof candidates[shotIndex] === 'object'
                 ? candidates[shotIndex]
                 : {};
-            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 1800);
-            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 1600);
+            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 100000);
+            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 100000);
             if (!HAN.test(imagePrompt)) imagePrompt = `中文广告画面：${imagePrompt}`;
             if (!HAN.test(videoPrompt)) videoPrompt = `中文视频镜头：${videoPrompt}`;
             ({ imagePrompt, videoPrompt } = compactProductShotPrompts({
                 imagePrompt,
                 videoPrompt,
                 consistencyAnchor: options.consistencyAnchor,
+                characterAnchor: options.characterAnchor,
                 styleAnchor: options.styleAnchor,
                 visualDirection: concept.visualDirection,
                 sceneWorld: concept.sceneWorld,
@@ -282,6 +283,27 @@ router.post('/analyze', async (req, res) => {
     if (!productImageUrls.length) {
         return res.status(400).json({ error: '请至少提供一张产品参考图' });
     }
+
+    // 数字人（可选）：锁定出镜人物外貌，与产品参考图分轨
+    const digitalHumanBody = body.digitalHuman && typeof body.digitalHuman === 'object' ? body.digitalHuman : null;
+    const digitalHumanImages = Array.from(new Set([
+        ...(Array.isArray(digitalHumanBody?.referenceImages) ? digitalHumanBody.referenceImages : []),
+        digitalHumanBody?.coverUrl,
+    ].map(value => cleanString(value, '', 20_000_000)).filter(Boolean))).slice(0, 4);
+    const digitalHuman = digitalHumanImages.length
+        ? {
+            id: cleanString(digitalHumanBody?.id, '', 80) || null,
+            name: cleanString(digitalHumanBody?.name, '数字人', 80),
+            coverUrl: digitalHumanImages[0],
+            referenceImages: digitalHumanImages,
+            identityAnchor: cleanString(
+                digitalHumanBody?.identityAnchor,
+                `${cleanString(digitalHumanBody?.name, '数字人', 80)}，五官、发型、肤色、体态与气质严格以数字人参考图为准，全片同一人物身份，禁止另造脸`,
+                800,
+            ),
+        }
+        : null;
+    const characterAnchor = digitalHuman?.identityAnchor || '';
     if (!getKey('TEXT_API_KEY')) {
         return res.status(400).json({ error: '请先在设置中配置文字模型 API Key' });
     }
@@ -328,7 +350,7 @@ router.post('/analyze', async (req, res) => {
         const dnaReply = await multimodalChat({
             system: `${analyzeSystem}
 
-强制要求：只输出 JSON；所有文字使用中文；商品图是唯一视觉事实来源。不得因商品名或卖点而臆造图中不存在的包装、参数、认证和功效。`,
+强制要求：只输出 JSON；所有文字使用中文；商品图是产品视觉唯一事实来源。不得因商品名或卖点而臆造图中不存在的包装、参数、认证和功效。${digitalHuman ? '若同时提供了数字人参考图，仅用于理解出镜人物气质，不要用数字人外貌覆盖产品包装描述。' : ''}`,
             prompt: `请分析商品图片并输出以下 JSON：
 {
   "productDNA": {
@@ -354,6 +376,7 @@ router.post('/analyze', async (req, res) => {
 商品名：${input.productName}
 卖点：${input.sellingPoints.join('；') || '未提供'}
 参考图数量：${productImageUrls.length} 张（请综合正面、侧面、包装细节等角度，识别同一产品的稳定视觉特征）
+${digitalHuman ? `数字人（出镜人物锁定，名：${digitalHuman.name}）：${characterAnchor}\n数字人参考图 ${digitalHumanImages.length} 张仅用于人物外貌，不得改写产品外观。` : '未指定数字人：创意中的人物可自由设计，但不要捏造产品。'}
 行业模板：${template.industry}
 合规规则：${complianceRules.join('；')}`,
             imageUrls: productImageUrls,
@@ -371,6 +394,7 @@ router.post('/analyze', async (req, res) => {
             system: `${conceptSystem}
 
 所有内容使用中文。创意必须彼此差异明显，且只能使用产品 DNA 中已确认的信息。遵守广告合规规则，禁止绝对化、疗效化、虚构参数和虚构优惠。
+${digitalHuman ? `已指定数字人「${digitalHuman.name}」：凡有人物出镜，外貌必须以该数字人为唯一真相，禁止另造脸或换角；产品包装仍只信产品 DNA。` : ''}
 
 生成前在内部完成创意质检，但不要输出思考过程：
 - 每套创意是否只突出一个核心利益点，并对应一个真实购买动机；
@@ -388,6 +412,7 @@ router.post('/analyze', async (req, res) => {
 风格锚点：${styleAnchor}
 合规规则：${complianceRules.join('；')}
 产品 DNA：${JSON.stringify(productDNA)}
+${digitalHuman ? `数字人锁定：${JSON.stringify({ name: digitalHuman.name, identityAnchor: characterAnchor })}` : ''}
 
 输出字段要求：
 - title：简洁的内部创意名称，不作为画面文案；
@@ -415,12 +440,13 @@ JSON：
 强制要求：
 1. 所有提示词、字幕、旁白和转场均用中文。
 2. 每个镜头都要保证商品一致；包装、主色、材质、比例、标签位置不得漂移。
-3. imagePrompt 建议 200～450 字：产品锚点可简要引用 + 镜头职责 + 场景 + 景别机位 + 构图 + 光线 + 材质；不要把同一段 DNA 原样复制五六遍。
-4. videoPrompt 建议 150～350 字：起始→一个动作→一种运镜→结束→衔接；禁止同时推拉摇移环绕。
+3. imagePrompt 可写充分细节：产品锚点 + ${digitalHuman ? '数字人人物锚点 + ' : ''}镜头职责 + 场景 + 景别机位 + 构图 + 光线 + 材质。
+4. videoPrompt 可写充分细节：起始→一个动作→一种运镜→结束→衔接；禁止同时推拉摇移环绕。
 5. 关键帧连续，相邻镜至少改变景别、角度或运动中的两项。
 6. 字幕建议不超过 16 字；旁白与画面同步。
 7. 不得虚构认证、功效、价格、优惠。
 8. 不同 concept 布景与节奏要明显不同。
+${digitalHuman ? '9. 有人物出镜时，五官/发型/体态必须以数字人参考为准；禁止另造脸；禁止把人脸画到包装上。' : ''}
 
 只输出严格 JSON。`,
             prompt: `请为每套创意生成恰好 ${shotsPerConcept} 张连续关键帧，并以这些关键帧直接生成一条约 ${videoDuration} 秒的完整视频。
@@ -430,8 +456,10 @@ JSON：
 画幅：${aspectRatio}
 风格锚点：${styleAnchor}
 产品视觉一致性锚点：${productDNA.visualIdentity.consistencyAnchor}
+${digitalHuman ? `数字人人物一致性锚点：${characterAnchor}` : ''}
 合规规则：${complianceRules.join('；')}
 产品 DNA：${JSON.stringify(productDNA)}
+${digitalHuman ? `数字人：${JSON.stringify({ name: digitalHuman.name, identityAnchor: characterAnchor })}` : ''}
 创意：${JSON.stringify(concepts)}
 
 输出：
@@ -449,6 +477,7 @@ JSON：
             aspectRatio,
             styleAnchor,
             consistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
+            characterAnchor,
         }).map(concept => ({
             ...concept,
             storyboardPrompt: buildCompactBackendStoryboardPrompt(concept, {
@@ -457,6 +486,7 @@ JSON：
                 industry: template.industry,
                 productName: productDNA.productName,
                 consistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
+                characterAnchor,
             }),
         }));
 
@@ -464,11 +494,12 @@ JSON：
             type: 'done',
             data: {
                 title: `${productDNA.productName || '产品'}广告创意`,
-                summary: `为${platform}生成 ${normalizedConcepts.length} 套独立广告创意，每套把 ${shotsPerConcept} 格时间轴分镜合成一张故事板母版并直出一条成片`,
+                summary: `为${platform}生成 ${normalizedConcepts.length} 套独立广告创意，每套把 ${shotsPerConcept} 格时间轴分镜合成一张故事板母版并直出一条成片${digitalHuman ? `；出镜人物锁定为数字人「${digitalHuman.name}」` : ''}`,
                 styleAnchor,
                 templateId: template.id,
                 industry: template.industry,
                 productDNA,
+                talent: digitalHuman,
                 concepts: normalizedConcepts,
             },
         });

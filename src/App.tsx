@@ -1087,6 +1087,17 @@ export default function App() {
       showAppAlert('未找到产品参考图，请重新打开产品一键出片并添加图片。', { title: '产品一键出片' });
       return;
     }
+    const digitalHuman = opts.digitalHuman || (result as any).talent || null;
+    const digitalHumanImages = Array.from(new Set([
+      ...(Array.isArray(digitalHuman?.referenceImages) ? digitalHuman.referenceImages : []),
+      digitalHuman?.coverUrl,
+    ].filter(Boolean))).slice(0, 4) as string[];
+    const characterAnchor = String(
+      digitalHuman?.identityAnchor
+      || (digitalHumanImages.length
+        ? `${digitalHuman?.name || '数字人'}，五官、发型、肤色、体态与气质严格以数字人参考图为准，全片同一人物身份，禁止另造脸`
+        : ''),
+    );
     const productName = String(result.productDNA?.productName || opts.productName || '未命名产品');
     if (opts.generationScope !== 'nodes') {
       storyAutoGenRef.current = null;
@@ -1118,6 +1129,24 @@ export default function App() {
       campaignId,
       adRole: 'product-anchor',
     }));
+    const talentNodes: NodeData[] = digitalHumanImages.map((image, index) => ({
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.IMAGE,
+      title: index === 0
+        ? `数字人 · ${digitalHuman?.name || '出镜人物'}`
+        : `数字人参考 ${index + 1} · ${digitalHuman?.name || '出镜人物'}`,
+      x: 0,
+      y: 0,
+      prompt: characterAnchor,
+      status: NodeStatus.SUCCESS,
+      resultUrl: image,
+      parentIds: [],
+      campaignId,
+      adRole: 'talent-anchor' as const,
+      digitalHumanReferenceUrls: digitalHumanImages,
+      characterReferenceUrls: digitalHumanImages,
+    }));
     const briefNode: NodeData = {
       ...defaults,
       id: crypto.randomUUID(),
@@ -1130,6 +1159,7 @@ export default function App() {
         `【行业】${opts.industry || result.productDNA?.category || '通用电商'}`,
         `【平台】${opts.platform}`,
         `【产品视觉锁定】${consistencyAnchor}`,
+        characterAnchor ? `【数字人人物锁定】${characterAnchor}` : '',
         `【产品 DNA】\n${JSON.stringify(result.productDNA || {}, null, 2)}`,
         opts.sellingPoints ? `【用户提供卖点】\n${opts.sellingPoints}` : '',
       ].filter(Boolean).join('\n\n'),
@@ -1211,6 +1241,7 @@ export default function App() {
           videoDuration,
           aspectRatio: ratio,
           consistencyAnchor,
+          characterAnchor: characterAnchor || undefined,
           visualDirection: concept.visualDirection,
           sceneWorld: concept.sceneWorld,
           colorLighting: concept.colorLighting,
@@ -1218,8 +1249,10 @@ export default function App() {
         }),
         aspectRatio: ratio,
         resolution: storyboardResolution,
-        parentIds: [directionNode.id, ...productNodes.map(node => node.id)],
+        parentIds: [directionNode.id, ...talentNodes.map(node => node.id), ...productNodes.map(node => node.id)],
         productReferenceUrls: productImages,
+        digitalHumanReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
+        characterReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
         klingReferenceMode: 'subject',
         klingSubjectIntensity: 90,
         groupId,
@@ -1243,14 +1276,17 @@ export default function App() {
           productName,
           videoDuration,
           consistencyAnchor,
+          characterAnchor: characterAnchor || undefined,
           visualDirection: concept.visualDirection,
           rhythm: concept.rhythm,
           voiceover: opts.generateVoiceover ? combinedVoiceover : '',
           subtitles: opts.generateSubtitles ? combinedSubtitle : '',
           shots: concept.shots || [],
         }),
-        parentIds: [storyboardNode.id, ...productNodes.map(node => node.id)],
+        parentIds: [storyboardNode.id, ...talentNodes.map(node => node.id), ...productNodes.map(node => node.id)],
         productReferenceUrls: productImages,
+        digitalHumanReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
+        characterReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
         videoDuration,
         videoMode: 'multi-keyframe',
         videoModel: 'grok-imagine-video',
@@ -1279,6 +1315,15 @@ export default function App() {
           styleAnchor: opts.styleAnchor || '',
           referenceImageUrl: productImage,
           referenceImageUrls: productImages,
+          digitalHuman: digitalHumanImages.length
+            ? {
+                id: digitalHuman?.id || null,
+                name: digitalHuman?.name || '数字人',
+                coverUrl: digitalHumanImages[0],
+                referenceImages: digitalHumanImages,
+                identityAnchor: characterAnchor,
+              }
+            : null,
           platform: opts.platform,
           aspectRatio: ratio,
           conceptCount: opts.conceptCount,
@@ -1297,12 +1342,20 @@ export default function App() {
     let laneY = -totalLaneHeight / 2;
     const productCellW = productNodes.length ? Math.max(...productNodes.map(getNodeWidth)) : 320;
     const productCellH = productNodes.length ? Math.max(...productNodes.map(getNodeHeight)) : 320;
+    const talentCellW = talentNodes.length ? Math.max(...talentNodes.map(getNodeWidth)) : 0;
+    const talentCellH = talentNodes.length ? Math.max(...talentNodes.map(getNodeHeight)) : 0;
     productNodes.forEach((node, index) => {
       node.x = baseX + (index % 2) * (productCellW + 32);
       node.y = -((Math.ceil(productNodes.length / 2) * (productCellH + 32)) / 2) + Math.floor(index / 2) * (productCellH + 32);
     });
     const productGridWidth = Math.min(2, Math.max(1, productNodes.length)) * productCellW
       + Math.max(0, Math.min(2, productNodes.length) - 1) * 32;
+    // 数字人锚点放在产品区下方
+    talentNodes.forEach((node, index) => {
+      node.x = baseX + (index % 2) * ((talentCellW || productCellW) + 32);
+      node.y = (productCellH * Math.ceil(Math.max(1, productNodes.length) / 2)) / 2 + 48
+        + Math.floor(index / 2) * ((talentCellH || productCellH) + 32);
+    });
     briefNode.x = baseX + productGridWidth + GAP_X;
     briefNode.y = -getNodeHeight(briefNode) / 2;
     const laneStartX = briefNode.x + getNodeWidth(briefNode) + GAP_X;
@@ -1317,7 +1370,7 @@ export default function App() {
       laneY += rowHeight + laneGapY;
     });
 
-    const allNew = [...productNodes, briefNode, ...conceptNodes, ...directionNodes, ...imageNodes, ...videoNodes];
+    const allNew = [...productNodes, ...talentNodes, briefNode, ...conceptNodes, ...directionNodes, ...imageNodes, ...videoNodes];
     setNodes(prev => [...prev, ...allNew]);
     setGroups(prev => [...prev, ...newGroups]);
     setSelectedNodeIds(allNew.map(n => n.id));

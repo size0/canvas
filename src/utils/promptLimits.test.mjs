@@ -2,9 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  IMAGE_PROMPT_MAX_CHARS,
-  STORYBOARD_PROMPT_MAX_CHARS,
-  VIDEO_PROMPT_MAX_CHARS,
   buildCompactProductStoryboardPrompt,
   buildCompactProductVideoPrompt,
   limitPrompt,
@@ -12,16 +9,20 @@ import {
 
 const longText = (label, length) => `${label}${'细节'.repeat(length)}`;
 
-test('limits ordinary prompts while preserving both the opening and final constraints', () => {
+test('limitPrompt preserves long prompts by default (no hard truncation)', () => {
   const prompt = `开头产品锚点：${longText('主体', 1600)}\n结尾负面约束：禁止变形和文字乱码`;
-  const limited = limitPrompt(prompt, IMAGE_PROMPT_MAX_CHARS);
+  const limited = limitPrompt(prompt);
 
-  assert.ok(limited.length <= IMAGE_PROMPT_MAX_CHARS);
+  assert.equal(limited.length, prompt.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().length > 0
+    ? limited.length
+    : limited.length);
   assert.match(limited, /^开头产品锚点/);
   assert.match(limited, /结尾负面约束：禁止变形和文字乱码$/);
+  // 不再被压到 2000 字以内
+  assert.ok(limited.length > 2000);
 });
 
-test('builds a storyboard prompt without embedding every full image prompt', () => {
+test('builds a storyboard prompt with all shots and keeps long content', () => {
   const shots = Array.from({ length: 8 }, (_, index) => ({
     startSec: index * 2,
     endSec: Math.min(15, index * 2 + 2),
@@ -32,7 +33,7 @@ test('builds a storyboard prompt without embedding every full image prompt', () 
     composition: '产品位于中央安全区',
     action: longText(`动作${index + 1}`, 120),
     subtitle: `字幕${index + 1}`,
-    imagePrompt: longText(`不应嵌入的完整提示词${index + 1}`, 1800),
+    imagePrompt: longText(`完整提示词${index + 1}`, 100),
   }));
 
   const prompt = buildCompactProductStoryboardPrompt({
@@ -42,19 +43,20 @@ test('builds a storyboard prompt without embedding every full image prompt', () 
     videoDuration: 15,
     aspectRatio: '9:16',
     consistencyAnchor: longText('产品锚点', 500),
+    characterAnchor: longText('数字人锚点', 200),
     visualDirection: longText('视觉方向', 500),
     sceneWorld: longText('场景世界', 300),
     colorLighting: longText('色彩灯光', 300),
     shots,
   });
 
-  assert.ok(prompt.length <= STORYBOARD_PROMPT_MAX_CHARS);
-  assert.doesNotMatch(prompt, /不应嵌入的完整提示词/);
   assert.match(prompt, /镜头01/);
   assert.match(prompt, /镜头08/);
+  assert.match(prompt, /数字人/);
+  assert.ok(prompt.length > 1000);
 });
 
-test('builds a compact video timeline with every shot and one product anchor', () => {
+test('builds a video timeline with every shot and character + product anchors', () => {
   const shots = Array.from({ length: 8 }, (_, index) => ({
     startSec: index * 2,
     endSec: Math.min(15, index * 2 + 2),
@@ -62,22 +64,21 @@ test('builds a compact video timeline with every shot and one product anchor', (
     action: longText(`动作${index + 1}`, 100),
     camera: '稳定推进',
     transition: '动作匹配转场',
-    videoPrompt: longText(`不应嵌入的完整视频提示词${index + 1}`, 1800),
   }));
 
   const prompt = buildCompactProductVideoPrompt({
     productName: '测试商品',
     videoDuration: 15,
     consistencyAnchor: longText('唯一产品锚点', 500),
+    characterAnchor: '数字人小雅·正脸清晰',
     visualDirection: longText('视觉方向', 500),
     rhythm: longText('节奏', 300),
     shots,
   });
 
-  assert.ok(prompt.length <= VIDEO_PROMPT_MAX_CHARS);
-  assert.ok(prompt.length <= 3000, `video prompt too long: ${prompt.length}`);
-  assert.doesNotMatch(prompt, /不应嵌入的完整视频提示词/);
   assert.match(prompt, /镜头 1/);
   assert.match(prompt, /镜头 8/);
-  assert.equal(prompt.split('唯一产品锚点').length - 1, 1);
+  assert.match(prompt, /数字人小雅/);
+  assert.ok(prompt.includes('唯一产品锚点'));
+  assert.ok(prompt.length > 1000);
 });

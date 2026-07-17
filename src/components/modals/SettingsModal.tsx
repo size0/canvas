@@ -52,7 +52,7 @@ const GROUPS: GroupDef[] = [
         fields: [
             { key: 'VIDEO_API_URL', label: '网址 (Base URL)', placeholder: 'https://www.gpt2api.com/v1', hint: '接入地址，例如 https://www.gpt2api.com/v1' },
             { key: 'VIDEO_API_KEY', label: 'KEY (API Key)', hint: 'sk- 开头的密钥' },
-            { key: 'VIDEO_MODEL', label: '模型名', placeholder: 'grok-imagine-video', hint: '统一下游接口推荐 grok-imagine-video；xai/grok-imagine-video 使用另一套官方 xAI 参数格式' },
+            { key: 'VIDEO_MODEL', label: '模型名', placeholder: 'grok-imagine-video', hint: '推荐 grok-imagine-video（时长 6/10/20/30 秒）。xai/grok-imagine-video 为官方 xAI 参数格式；sora 为 4/8/12；veo3.1* 为 4/6/8' },
         ],
     },
     {

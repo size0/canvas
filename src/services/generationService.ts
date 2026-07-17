@@ -1,10 +1,4 @@
-import {
-  IMAGE_PROMPT_MAX_CHARS,
-  SINGLE_VIDEO_PROMPT_MAX_CHARS,
-  STORYBOARD_PROMPT_MAX_CHARS,
-  VIDEO_PROMPT_MAX_CHARS,
-  limitPrompt,
-} from '../utils/promptLimits.ts';
+import { limitPrompt } from '../utils/promptLimits.ts';
 
 /**
  * generationService.ts
@@ -52,12 +46,10 @@ export interface GenerateVideoParams {
 export const generateImage = async (params: GenerateImageParams): Promise<string> => {
   try {
     const { signal, ...rawBody } = params;
-    const promptLimit = /故事板|storyboard/i.test(rawBody.title || '')
-      ? STORYBOARD_PROMPT_MAX_CHARS
-      : IMAGE_PROMPT_MAX_CHARS;
+    // 长提示词不再截断，仅做空白规范化
     const body = {
       ...rawBody,
-      prompt: limitPrompt(rawBody.prompt, promptLimit),
+      prompt: limitPrompt(rawBody.prompt),
     };
     const response = await fetch('/api/generate-image', {
       method: 'POST',
@@ -178,17 +170,12 @@ const isRecoverableProxyFailure = (response: Response, message: string): boolean
  */
 export const generateVideo = async (params: GenerateVideoParams): Promise<string> => {
   const { signal, ...rawBody } = params;
-  const normalizedVideoModel = rawBody.videoModel === 'xai/grok-imagine-video'
-    ? 'grok-imagine-video'
-    : rawBody.videoModel;
+  // 保留 xai/grok-imagine-video：后端会按官方 xAI 参数格式发送
+  const normalizedVideoModel = rawBody.videoModel;
   const body = {
     ...rawBody,
-    prompt: limitPrompt(
-      rawBody.prompt,
-      (rawBody.referenceImages?.length || 0) > 1
-        ? VIDEO_PROMPT_MAX_CHARS
-        : SINGLE_VIDEO_PROMPT_MAX_CHARS,
-    ),
+    // 长提示词不再截断，仅做空白规范化
+    prompt: limitPrompt(rawBody.prompt),
     videoModel: normalizedVideoModel,
     duration: normalizeVideoDuration(rawBody.duration, normalizedVideoModel),
     resolution: normalizeVideoResolution(rawBody.resolution),

@@ -109,8 +109,9 @@ export interface NodeData {
   // Product advertising workflow
   campaignId?: string; // Product campaign this node belongs to
   conceptId?: string; // Creative concept this node belongs to
-  adRole?: 'product-anchor' | 'product-brief' | 'concept-script' | 'visual-direction' | 'storyboard-board' | 'shot-image' | 'shot-video' | 'final-video' | 'concept-video';
+  adRole?: 'product-anchor' | 'talent-anchor' | 'product-brief' | 'concept-script' | 'visual-direction' | 'storyboard-board' | 'shot-image' | 'shot-video' | 'final-video' | 'concept-video';
   productReferenceUrls?: string[]; // Original product references used to preserve packaging/logo
+  digitalHumanReferenceUrls?: string[]; // Digital human face/body refs (identity lock)
   shotIndex?: number; // Order inside one advertising concept
   transition?: string; // Suggested transition into the next shot
   adSubtitle?: string; // Subtitle burned into the final advertising video
@@ -163,6 +164,13 @@ export interface NodeGroup {
     styleAnchor: string;
     referenceImageUrl: string;
     referenceImageUrls?: string[];
+    digitalHuman?: {
+      id?: string | null;
+      name: string;
+      coverUrl: string;
+      referenceImages: string[];
+      identityAnchor?: string;
+    } | null;
     platform: string;
     aspectRatio: string;
     conceptCount: number;

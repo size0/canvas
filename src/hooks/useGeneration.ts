@@ -155,6 +155,15 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     }
                 }
 
+                // Digital human identity refs (face/body) — before product packaging refs
+                if (node.digitalHumanReferenceUrls && node.digitalHumanReferenceUrls.length > 0) {
+                    for (const talentUrl of node.digitalHumanReferenceUrls) {
+                        if (imageBase64s.length < 14 && !imageBase64s.includes(talentUrl)) {
+                            imageBase64s.push(talentUrl);
+                        }
+                    }
+                }
+
                 // Product references are always included for advertising shots so the
                 // model preserves packaging, logo, shape and color across concepts.
                 if (node.productReferenceUrls && node.productReferenceUrls.length > 0) {
