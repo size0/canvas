@@ -134,6 +134,86 @@ function extractSyncItem(data) {
     }
     return null;
 }
+function extractNestedAsyncTask(data, base) {
+    const task = data?.data;
+    if (!task || Array.isArray(task) || typeof task !== 'object') return null;
+    const id = task.task_id || task.id;
+    const statusUrl = task.status_url;
+    if (!id && !statusUrl) return null;
+
+    const absoluteUrl = (value) => {
+        if (!value) return null;
+        try {
+            return new URL(value, base + '/').toString();
+        } catch {
+            return value;
+        }
+    };
+
+    return {
+        id,
+        status: String(task.status || '').toLowerCase(),
+        statusUrl: absoluteUrl(statusUrl || (id ? `${base}/images/${id}` : null)),
+        resultUrl: absoluteUrl(task.result_url),
+        error: task.error,
+    };
+}
+
+function asyncTaskErrorMessage(error, fallback) {
+    if (!error) return fallback;
+    if (typeof error === 'string') return error;
+    return error.message || error.code || fallback;
+}
+
+async function fetchNestedAsyncImageResult(resultUrl, apiKey) {
+    const res = await fetch(resultUrl, { headers: authHeaders(apiKey) });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.startsWith('image/')) {
+        if (!res.ok) throw new Error(`Failed to download async image result (HTTP ${res.status})`);
+        const subtype = contentType.split('/')[1]?.split(';')[0]?.toLowerCase();
+        const format = subtype === 'jpeg' ? 'jpg' : (subtype || 'png');
+        return { buffer: Buffer.from(await res.arrayBuffer()), format };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data?.error?.message || data?.error || `Async image result request failed (HTTP ${res.status})`);
+    }
+    const item = extractSyncItem(data) || extractSyncItem(data?.data);
+    if (!item) throw new Error('Async image task completed without an image');
+    return item;
+}
+
+async function pollNestedAsyncImageTask(initialTask, base, apiKey, { timeoutMs = 300000 } = {}) {
+    const start = Date.now();
+    let task = initialTask;
+
+    while (true) {
+        if (Date.now() - start > timeoutMs) throw new Error('Async image task timed out');
+
+        if (['succeeded', 'completed', 'success', 'done'].includes(task.status)) {
+            if (!task.resultUrl) throw new Error('Async image task completed without result_url');
+            return fetchNestedAsyncImageResult(task.resultUrl, apiKey);
+        }
+        if (['failed', 'cancelled', 'canceled', 'expired', 'refunded'].includes(task.status)) {
+            throw new Error(asyncTaskErrorMessage(task.error, 'Async image task failed'));
+        }
+
+        const res = await fetch(task.statusUrl, { headers: authHeaders(apiKey) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data?.error?.message || data?.error || `Async image task status request failed (HTTP ${res.status})`);
+        }
+        const nextTask = extractNestedAsyncTask(data, base);
+        if (!nextTask) throw new Error('Async image task status response is missing data.id');
+        task = nextTask;
+
+        if (!['succeeded', 'completed', 'success', 'done', 'failed', 'cancelled', 'canceled', 'expired', 'refunded'].includes(task.status)) {
+            const retryAfter = parseInt(res.headers.get('Retry-After') || '', 10);
+            await sleep((Number.isFinite(retryAfter) ? Math.max(1, retryAfter) : 3) * 1000);
+        }
+    }
+}
 
 /**
  * 图像生成（文生图 / 图生图）。返回 { buffer, format }。
@@ -168,12 +248,19 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     // 同步返回：直接取结果
     let item = extractSyncItem(data);
     if (!item) {
-        // 异步：轮询任务
-        const taskId = data.task_id || data.id;
-        if (!taskId) throw new Error('图像接口未返回结果或 task_id');
-        item = await pollTask(`${base}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+        const nestedTask = extractNestedAsyncTask(data, base);
+        if (nestedTask) {
+            console.log('[gpt2api] Async image task created:', nestedTask.id || nestedTask.statusUrl);
+            item = await pollNestedAsyncImageTask(nestedTask, base, apiKey, { timeoutMs: 300000 });
+        } else {
+            // Keep compatibility with legacy top-level task_id responses.
+            const taskId = data.task_id || data.id;
+            if (!taskId) throw new Error('Image API returned neither a result nor task_id');
+            item = await pollTask(`${base}/images/generations/${taskId}`, apiKey, { timeoutMs: 300000 });
+        }
     }
 
+    if (item.buffer) return { buffer: item.buffer, format: item.format || 'png' };
     if (item.url) {
         const buffer = await downloadToBuffer(item.url);
         const format = item.url.includes('.jpg') || item.url.includes('.jpeg') ? 'jpg' : 'png';

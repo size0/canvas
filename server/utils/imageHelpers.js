@@ -31,6 +31,9 @@ export function resolveImageToBase64(input) {
     if (input.startsWith('http://') || input.startsWith('https://')) {
         try {
             const url = new URL(input);
+            if (!url.pathname.startsWith('/library/')) {
+                return input;
+            }
             filePath = url.pathname; // Extract just the path portion
         } catch (e) {
             console.warn('Failed to parse URL:', input);
