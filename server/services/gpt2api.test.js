@@ -59,6 +59,12 @@ test('routes heavy Airelvo sync requests through its async queue', async () => {
             body: options.body ? JSON.parse(options.body) : null,
         });
         if (calls.length === 1) {
+            return new Response(Uint8Array.from([1, 2, 3]), {
+                status: 200,
+                headers: { 'Content-Type': 'image/jpeg' },
+            });
+        }
+        if (calls.length === 2) {
             return jsonResponse({
                 data: {
                     id: 'heavy-1',
@@ -67,7 +73,7 @@ test('routes heavy Airelvo sync requests through its async queue', async () => {
                 },
             }, 201);
         }
-        if (calls.length === 2) {
+        if (calls.length === 3) {
             return jsonResponse({
                 data: {
                     id: 'heavy-1',
@@ -77,7 +83,7 @@ test('routes heavy Airelvo sync requests through its async queue', async () => {
                 },
             });
         }
-        if (calls.length === 3) {
+        if (calls.length === 4) {
             return new Response(Uint8Array.from([10, 11, 12]), {
                 status: 200,
                 headers: { 'Content-Type': 'image/png' },
@@ -95,14 +101,43 @@ test('routes heavy Airelvo sync requests through its async queue', async () => {
             model: 'gpt-image-2',
             baseUrl: 'https://airelvo.cc/v1',
             apiKey: 'test-key',
+            resolveDns: async () => [{ address: '93.184.216.34', family: 4 }],
         });
 
-        assert.equal(calls[0].url, 'https://airelvo.cc/v1/async/images/edits');
-        assert.equal(calls[0].body.async, true);
-        assert.equal(calls[0].body.image, 'https://img.example/reference.jpg');
-        assert.equal(calls[1].url, 'https://airelvo.cc/v1/async/images/heavy-1');
-        assert.equal(calls[2].url, 'https://airelvo.cc/v1/async/images/heavy-1/result');
+        assert.equal(calls[0].url, 'https://img.example/reference.jpg');
+        assert.equal(calls[0].method, 'GET');
+        assert.equal(calls[1].url, 'https://airelvo.cc/v1/async/images/edits');
+        assert.equal(calls[1].body.async, true);
+        assert.equal(calls[1].body.reference_image, 'data:image/jpeg;base64,AQID');
+        assert.equal(calls[1].body.image, undefined);
+        assert.equal(calls[1].body.images, undefined);
+        assert.equal(calls[2].url, 'https://airelvo.cc/v1/async/images/heavy-1');
+        assert.equal(calls[3].url, 'https://airelvo.cc/v1/async/images/heavy-1/result');
         assert.deepEqual([...result.buffer], [10, 11, 12]);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
+test('rejects private-network reference image URLs before fetching them', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => {
+        throw new Error('fetch should not be called');
+    };
+
+    try {
+        await assert.rejects(
+            generateGpt2apiImage({
+                prompt: 'private URL check',
+                imageBase64Array: ['http://127.0.0.1/internal.png'],
+                aspectRatio: '1:1',
+                resolution: '1K',
+                model: 'gpt-image-2',
+                baseUrl: 'https://airelvo.cc/v1/async',
+                apiKey: 'test-key',
+            }),
+            /private or unsafe network address/,
+        );
     } finally {
         global.fetch = originalFetch;
     }

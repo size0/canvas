@@ -1,3 +1,6 @@
+import net from 'node:net';
+import { lookup as lookupDns } from 'node:dns/promises';
+
 /**
  * gpt2api.js
  *
@@ -68,6 +71,133 @@ function shouldUseAirelvoAsync({ prompt, hasRef, resolution }) {
 
 function toAirelvoAsyncBase(base) {
     return base.replace(/\/+$/, '') + '/async';
+}
+
+function isAirelvoAsyncBase(base) {
+    try {
+        const url = new URL(base);
+        return url.hostname.toLowerCase() === 'airelvo.cc' && url.pathname.replace(/\/+$/, '') === '/v1/async';
+    } catch {
+        return false;
+    }
+}
+
+function isPrivateOrUnsafeAddress(address) {
+    const normalized = String(address || '').toLowerCase().split('%')[0];
+    const family = net.isIP(normalized);
+
+    if (family === 4) {
+        const parts = normalized.split('.').map(Number);
+        const [a, b] = parts;
+        return a === 0
+            || a === 10
+            || a === 127
+            || (a === 100 && b >= 64 && b <= 127)
+            || (a === 169 && b === 254)
+            || (a === 172 && b >= 16 && b <= 31)
+            || (a === 192 && b === 0)
+            || (a === 192 && b === 168)
+            || (a === 198 && (b === 18 || b === 19))
+            || a >= 224;
+    }
+
+    if (family === 6) {
+        if (normalized.startsWith('::ffff:')) {
+            return isPrivateOrUnsafeAddress(normalized.slice('::ffff:'.length));
+        }
+        return normalized === '::'
+            || normalized === '::1'
+            || normalized.startsWith('fc')
+            || normalized.startsWith('fd')
+            || normalized.startsWith('fe8')
+            || normalized.startsWith('fe9')
+            || normalized.startsWith('fea')
+            || normalized.startsWith('feb')
+            || normalized.startsWith('ff')
+            || normalized.startsWith('2001:db8:');
+    }
+
+    return true;
+}
+
+async function assertSafeRemoteImageUrl(value, resolveDns) {
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        throw new Error('Reference image URL is invalid');
+    }
+
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        throw new Error('Reference image URL must use HTTP or HTTPS');
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+        throw new Error('Reference image URL points to a private or unsafe network address');
+    }
+
+    let addresses;
+    if (net.isIP(hostname)) {
+        addresses = [{ address: hostname }];
+    } else {
+        try {
+            addresses = await resolveDns(hostname, { all: true, verbatim: true });
+        } catch {
+            throw new Error('Failed to resolve reference image host');
+        }
+    }
+
+    if (!Array.isArray(addresses)) addresses = [addresses];
+    if (addresses.length === 0 || addresses.some(item => isPrivateOrUnsafeAddress(item?.address))) {
+        throw new Error('Reference image URL points to a private or unsafe network address');
+    }
+
+    return url;
+}
+
+async function remoteImageToDataUrl(value, resolveDns, { maxBytes = 20 * 1024 * 1024 } = {}) {
+    let current = await assertSafeRemoteImageUrl(value, resolveDns);
+
+    for (let redirectCount = 0; redirectCount <= 3; redirectCount++) {
+        const response = await fetch(current, {
+            redirect: 'manual',
+            headers: {
+                'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'User-Agent': 'Mozilla/5.0 (compatible; MagicalCanvas/1.0)',
+            },
+        });
+
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get('location');
+            if (!location || redirectCount === 3) throw new Error('Reference image redirected too many times');
+            current = await assertSafeRemoteImageUrl(new URL(location, current).toString(), resolveDns);
+            continue;
+        }
+
+        if (!response.ok) throw new Error(`Failed to download reference image (HTTP ${response.status})`);
+        const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (!contentType.startsWith('image/')) throw new Error('Reference image URL did not return an image');
+
+        const declaredLength = Number(response.headers.get('content-length'));
+        if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+            throw new Error('Reference image is too large');
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length > maxBytes) throw new Error('Reference image is too large');
+        return `data:${contentType};base64,${buffer.toString('base64')}`;
+    }
+
+    throw new Error('Failed to download reference image');
+}
+
+async function toAirelvoReferenceImage(value, resolveDns) {
+    const input = toImageInput(value);
+    if (!input) throw new Error('Airelvo async image edit requires a reference image');
+    if (input.startsWith('data:image/')) return input;
+    if (input.startsWith('data:')) throw new Error('Airelvo reference_image must be an image data URL');
+    return remoteImageToDataUrl(input, resolveDns);
 }
 
 async function pollTask(pollUrl, apiKey, { timeoutMs = 600000 } = {}) {
@@ -235,7 +365,7 @@ async function pollNestedAsyncImageTask(initialTask, base, apiKey, { timeoutMs =
 /**
  * 图像生成（文生图 / 图生图）。返回 { buffer, format }。
  */
-export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRatio, resolution, model, baseUrl, apiKey }) {
+export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRatio, resolution, model, baseUrl, apiKey, resolveDns = lookupDns }) {
     if (!apiKey) throw new Error('未配置 gpt2api API Key（请在「设置」中填写）');
     const base = (baseUrl || 'https://www.gpt2api.com/v1').replace(/\/+$/, '');
 
@@ -246,6 +376,7 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
     const routeThroughAsync = airelvoSync && shouldUseAirelvoAsync({ prompt, hasRef, resolution });
     const requestBase = routeThroughAsync ? toAirelvoAsyncBase(base) : base;
     const useAsyncRequest = routeThroughAsync || !airelvoSync;
+    const airelvoAsync = isAirelvoAsyncBase(requestBase);
     if (routeThroughAsync) {
         console.log('[gpt2api] Routing heavy Airelvo request through async queue');
     }
@@ -258,7 +389,9 @@ export async function generateGpt2apiImage({ prompt, imageBase64Array, aspectRat
         quality: RES_TO_IMAGE_QUALITY[resolution] || '1k',
         async: useAsyncRequest,
     };
-    if (hasRef) {
+    if (hasRef && airelvoAsync) {
+        body.reference_image = await toAirelvoReferenceImage(refs[0], resolveDns);
+    } else if (hasRef) {
         if (refs.length === 1) body.image = refs[0];
         else body.images = refs;
     }
