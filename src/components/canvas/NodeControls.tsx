@@ -37,7 +37,7 @@ const VIDEO_RESOLUTIONS = [
 ];
 
 // Video durations in seconds
-const VIDEO_DURATIONS = [5, 6, 8, 10];
+const VIDEO_DURATIONS = [6, 10, 20, 30];
 
 // Video model versions with metadata
 // supportsTextToVideo: Can generate video from text prompt only
@@ -50,11 +50,11 @@ const VIDEO_ASPECT_RATIOS = ["16:9", "9:16"];
 
 const VIDEO_MODELS = [
     // gpt2api.com 视频模型
-    { id: 'xai/grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [6, 10, 15], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16', '1:1'] },
-    { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
-    { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
-    { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
-    { id: 'sora', name: 'Sora 2', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 8, 12], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: 'xai/grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16', '1:1'] },
+    { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: 'sora', name: 'Sora 2', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'veo-3.1', name: 'Veo 3.1', provider: 'google', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [4, 6, 8], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     // Kling AI models - Consolidated: removed legacy v1, v1-5, v1-6, v2-master
     { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },

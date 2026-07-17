@@ -286,9 +286,10 @@ router.post('/analyze', async (req, res) => {
     const template = findProductTemplate(req, body.templateId, body.industry) || DEFAULT_TEMPLATE;
     const templateDefaults = template.defaults || {};
     const conceptCount = clampInt(body.conceptCount, 1, 8, templateDefaults.conceptCount || 3);
-    const videoDuration = [6, 10, 15].includes(Number(body.videoDuration))
+    const supportedVideoDurations = [6, 10, 20, 30];
+    const videoDuration = supportedVideoDurations.includes(Number(body.videoDuration))
         ? Number(body.videoDuration)
-        : ([6, 10, 15].includes(Number(templateDefaults.videoDuration)) ? Number(templateDefaults.videoDuration) : 15);
+        : (supportedVideoDurations.includes(Number(templateDefaults.videoDuration)) ? Number(templateDefaults.videoDuration) : 10);
     const shotsPerConcept = Math.ceil(videoDuration / 2);
     const timelineSpec = Array.from({ length: shotsPerConcept }, (_, index) => {
         const start = index * 2;

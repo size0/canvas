@@ -20,7 +20,7 @@ const COMMON_DEFAULTS = {
     conceptCount: 3,
     shotsPerConcept: 8,
     aspectRatio: '9:16',
-    videoDuration: 15,
+    videoDuration: 10,
     platform: '抖音',
 };
 
@@ -97,7 +97,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '瓶器形态、膏体或质地、肤感联想、使用步骤和目标人群',
         '高端美妆品牌广告，柔和透亮的漫射主光、精致轮廓高光与干净渐变背景，85mm 人像及 100mm 微距焦段感，真实瓶器玻璃/金属/磨砂材质，膏体液体纹理细腻，肤色自然不过度磨皮，包装颜色、泵头结构、文字版式始终一致，整体洁净、克制、奢华',
         ['不得宣称治疗皮肤疾病、速效美白、祛斑或其他无法证实的医疗功效'],
-        { videoDuration: 15 },
+        { videoDuration: 10 },
     ),
     makeTemplate(
         'builtin-food-beverage',
@@ -112,7 +112,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '工业设计、接口与部件、可见功能、操作流程、空间尺度和科技体验',
         '国际科技品牌发布片质感，低调冷色环境与精确条形轮廓光，35mm～85mm 电影镜头焦段感，金属、玻璃、塑料和屏幕反射符合真实物理规律，工业结构锐利而不过度锐化，空间尺度可信，机身尺寸、按键、接口、开孔和标识位置始终一致，避免科幻粒子滥用',
         ['参数、续航、性能、能效与防护等级只能使用用户明确提供的数据'],
-        { aspectRatio: '16:9', videoDuration: 15 },
+        { aspectRatio: '16:9', videoDuration: 10 },
     ),
     makeTemplate(
         'builtin-fashion-bags',
@@ -127,7 +127,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '门店环境、服务过程、到店动线、招牌项目和真实可感知体验',
         '高品质本地生活纪实广告，真实门店环境与自然人物互动，24mm～35mm 环境建立镜头结合 50mm 服务细节，现场光与柔和补光平衡，肤色自然、空间通透、烟火气真实，动作不过度表演，招牌、菜单、陈设、工服和门店视觉识别保持一致',
         ['地址、营业时间、价格、优惠、服务范围和预约条件只能使用用户提供的信息'],
-        { conceptCount: 2, shotsPerConcept: 8, videoDuration: 15 },
+        { conceptCount: 2, shotsPerConcept: 8, videoDuration: 10 },
     ),
 ];
 

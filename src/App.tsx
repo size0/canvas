@@ -84,6 +84,18 @@ const urlToBase64 = async (url: string): Promise<string> => {
   }
 };
 
+const GPT2API_VIDEO_DURATIONS = [6, 10, 20, 30];
+
+const normalizeGpt2apiVideoDuration = (duration: unknown): number => {
+  const requested = Number(duration);
+  if (!Number.isFinite(requested)) return GPT2API_VIDEO_DURATIONS[0];
+
+  return GPT2API_VIDEO_DURATIONS.reduce(
+    (supported, value) => value <= requested ? value : supported,
+    GPT2API_VIDEO_DURATIONS[0],
+  );
+};
+
 export default function App() {
   // ============================================================================
   // STATE
@@ -965,7 +977,7 @@ export default function App() {
       ...defaults, id: crypto.randomUUID(), type: NodeType.VIDEO,
       title: `镜头 ${String(i + 1).padStart(2, '0')} 视频`, x: 0, y: 0,
       prompt: [shot.videoPrompt || shot.description || '', shot.dialogue ? `对白（含说话人）：\n${shot.dialogue}` : ''].filter(Boolean).join('\n'),
-      aspectRatio: ratio, videoDuration: Math.max(2, Math.min(15, Number(shot.duration) || 6)), parentIds,
+      aspectRatio: ratio, videoDuration: normalizeGpt2apiVideoDuration(shot.duration), parentIds,
     });
 
     // —— 分镜图片列 + 视频列（按关键帧模式构建）——
@@ -1063,6 +1075,7 @@ export default function App() {
   ) => {
     const GAP_X = 160;
     const ratio = opts.aspectRatio || '9:16';
+    const videoDuration = normalizeGpt2apiVideoDuration(opts.videoDuration);
     const campaignId = crypto.randomUUID();
     const productImages = Array.from(new Set((opts.productImages || []).filter(Boolean))).slice(0, 6);
     const productImage = productImages[0];
@@ -1179,7 +1192,7 @@ export default function App() {
       };
       directionNodes.push(directionNode);
 
-      const storyboardResolution = opts.videoDuration >= 15 ? '4K' : '2K';
+      const storyboardResolution = videoDuration >= 15 ? '4K' : '2K';
       const storyboardNode: NodeData = {
         ...defaults,
         id: crypto.randomUUID(),
@@ -1192,7 +1205,7 @@ export default function App() {
           `故事板包含 ${concept.shots?.length || opts.shotsPerConcept} 个按时间顺序排列的 ${ratio} 成片构图画格。`,
           `${consistencyAnchor}。`,
           ...(concept.shots || []).map((shot, index) =>
-            `镜头${String(index + 1).padStart(2, '0')} ${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(opts.videoDuration, index * 2 + 2)}秒：${shot.imagePrompt}`
+            `镜头${String(index + 1).padStart(2, '0')} ${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(videoDuration, index * 2 + 2)}秒：${shot.imagePrompt}`
           ),
         ].filter(Boolean).join('\n'),
         aspectRatio: ratio,
@@ -1222,9 +1235,9 @@ export default function App() {
           `${consistencyAnchor}。`,
           concept.visualDirection ? `【视觉导演】${concept.visualDirection}` : '',
           concept.rhythm ? `【整体节奏】${concept.rhythm}` : '',
-          `第一张参考图是一张包含 ${concept.shots?.length || opts.shotsPerConcept} 格的完整故事板母版，请严格按画格编号和时间码演绎为一条 ${opts.videoDuration} 秒广告。后续参考图是产品原图，仅用于锁定产品外观。`,
+          `第一张参考图是一张包含 ${concept.shots?.length || opts.shotsPerConcept} 格的完整故事板母版，请严格按画格编号和时间码演绎为一条 ${videoDuration} 秒广告。后续参考图是产品原图，仅用于锁定产品外观。`,
           ...(concept.shots || []).map((shot, index) =>
-            `【${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(opts.videoDuration, index * 2 + 2)}秒｜镜头 ${index + 1}】${shot.videoPrompt || shot.action || shot.shotPurpose || '自然连续过渡'}`
+            `【${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(videoDuration, index * 2 + 2)}秒｜镜头 ${index + 1}】${shot.videoPrompt || shot.action || shot.shotPurpose || '自然连续过渡'}`
           ),
           opts.generateVoiceover && combinedVoiceover ? `【完整中文口播】${combinedVoiceover}` : '',
           opts.generateSubtitles && combinedSubtitle ? `【字幕文案】${combinedSubtitle}` : '',
@@ -1232,7 +1245,7 @@ export default function App() {
         ].filter(Boolean).join('\n'),
         parentIds: [storyboardNode.id, ...productNodes.map(node => node.id)],
         productReferenceUrls: productImages,
-        videoDuration: Math.max(6, Math.min(15, Number(opts.videoDuration) || 6)),
+        videoDuration,
         videoMode: 'multi-keyframe',
         videoModel: 'xai/grok-imagine-video',
         generateAudio: opts.generateVoiceover,
@@ -1264,7 +1277,7 @@ export default function App() {
           aspectRatio: ratio,
           conceptCount: opts.conceptCount,
           shotsPerConcept: opts.shotsPerConcept,
-          videoDuration: opts.videoDuration,
+          videoDuration: videoDuration,
         },
       });
     });

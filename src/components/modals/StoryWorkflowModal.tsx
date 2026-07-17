@@ -80,7 +80,7 @@ const KEYFRAME_MODES: { value: KeyframeMode; label: string; desc: string }[] = [
 // CONSTANTS
 // ============================================================================
 
-const DURATION_OPTIONS = [4, 6, 8, 10, 12, 15];
+const DURATION_OPTIONS = [6, 10, 20, 30];
 const SHOT_COUNT_MIN = 3;
 const SHOT_COUNT_MAX = 30;
 const RATIO_OPTIONS: { value: string; label: string }[] = [

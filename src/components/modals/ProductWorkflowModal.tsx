@@ -162,7 +162,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
     const [platform, setPlatform] = useState('抖音');
     const [aspectRatio, setAspectRatio] = useState('9:16');
     const [conceptCount, setConceptCount] = useState(3);
-    const [videoDuration, setVideoDuration] = useState(15);
+    const [videoDuration, setVideoDuration] = useState(10);
     const [generateSubtitles, setGenerateSubtitles] = useState(true);
     const [generateVoiceover, setGenerateVoiceover] = useState(true);
     const [generationScope, setGenerationScope] = useState<ProductGenerationScope>('final');
@@ -204,7 +204,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         if (template.defaults) {
             if (template.defaults.conceptCount) setConceptCount(Math.max(1, Math.min(6, template.defaults.conceptCount)));
             if (template.defaults.aspectRatio) setAspectRatio(template.defaults.aspectRatio);
-            if (template.defaults.videoDuration && [6, 10, 15].includes(template.defaults.videoDuration)) {
+            if (template.defaults.videoDuration && [6, 10, 20, 30].includes(template.defaults.videoDuration)) {
                 setVideoDuration(template.defaults.videoDuration);
             }
             if (template.defaults.platform) setPlatform(template.defaults.platform);
@@ -638,7 +638,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                         </div>
                         <div>
                             <label className={labelCls}><Clock size={12} />每条成片时长</label>
-                            <div className="flex gap-1">{[6, 10, 15].map(value => <button key={value} onClick={() => setVideoDuration(value)} className={`flex-1 ${choiceCls(videoDuration === value)}`}>{value}s</button>)}</div>
+                            <div className="flex gap-1">{[6, 10, 20, 30].map(value => <button key={value} onClick={() => setVideoDuration(value)} className={`flex-1 ${choiceCls(videoDuration === value)}`}>{value}s</button>)}</div>
                         </div>
                     </section>
 

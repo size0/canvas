@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { generateGpt2apiImage } from './gpt2api.js';
+import {
+    generateGpt2apiImage,
+    generateGpt2apiVideo,
+    normalizeGpt2apiVideoDuration,
+    resolveGpt2apiVideoModel,
+} from './gpt2api.js';
 
 function jsonResponse(body, status = 200, headers = {}) {
     return new Response(JSON.stringify(body), {
@@ -11,6 +16,69 @@ function jsonResponse(body, status = 200, headers = {}) {
 }
 
 
+test('normalizes video duration to the current GPT2API contract without increasing cost', () => {
+    assert.equal(normalizeGpt2apiVideoDuration(6), 6);
+    assert.equal(normalizeGpt2apiVideoDuration(10), 10);
+    assert.equal(normalizeGpt2apiVideoDuration(15), 10);
+    assert.equal(normalizeGpt2apiVideoDuration(20), 20);
+    assert.equal(normalizeGpt2apiVideoDuration(30), 30);
+    assert.equal(normalizeGpt2apiVideoDuration(31), 30);
+    assert.equal(normalizeGpt2apiVideoDuration('invalid'), 6);
+    assert.equal(normalizeGpt2apiVideoDuration(), 6);
+});
+
+test('resolves stale configured video models to a supported fallback', () => {
+    assert.equal(resolveGpt2apiVideoModel('sora', 'veo3.1'), 'sora');
+    assert.equal(resolveGpt2apiVideoModel('unknown-model', 'veo3.1'), 'veo3.1');
+    assert.equal(
+        resolveGpt2apiVideoModel(null, 'grok-imagine-video-1.5-fast'),
+        'xai/grok-imagine-video',
+    );
+});
+
+test('sends a normalized duration to the current GPT2API video endpoint', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        calls.push({
+            url: String(url),
+            method: options.method || 'GET',
+            body: options.body ? JSON.parse(options.body) : null,
+        });
+        if (calls.length === 1) return jsonResponse({ task_id: 'video-1' });
+        if (calls.length === 2) {
+            return jsonResponse({
+                status: 'succeeded',
+                result: { data: [{ url: 'https://cdn.example/video-1.mp4' }] },
+            });
+        }
+        return new Response(Uint8Array.from([20, 21, 22]), {
+            status: 200,
+            headers: { 'Content-Type': 'video/mp4' },
+        });
+    };
+
+    try {
+        const result = await generateGpt2apiVideo({
+            prompt: 'animate the product',
+            duration: 15,
+            resolution: '720p',
+            model: 'xai/grok-imagine-video',
+            baseUrl: 'https://gateway.example/v1',
+            apiKey: 'test-key',
+        });
+
+        assert.equal(calls[0].url, 'https://gateway.example/v1/video/generations');
+        assert.equal(calls[0].body.duration, 10);
+        assert.equal(calls[0].body.async, true);
+        assert.equal(calls[0].body.quality, 'hd');
+        assert.equal(calls[1].url, 'https://gateway.example/v1/video/generations/video-1');
+        assert.equal(calls[2].url, 'https://cdn.example/video-1.mp4');
+        assert.deepEqual([...result], [20, 21, 22]);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
 test('keeps light Airelvo requests on the configured sync endpoint', async () => {
     const calls = [];
     const originalFetch = global.fetch;

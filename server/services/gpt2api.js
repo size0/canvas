@@ -15,8 +15,26 @@ import { lookup as lookupDns } from 'node:dns/promises';
 export const GPT2API_IMAGE_MODELS = ['nano-banana-pro', 'nano-banana-v2', 'nano-banana', 'gpt-image-2'];
 export const GPT2API_VIDEO_MODELS = ['xai/grok-imagine-video', 'grok-imagine-video', 'sora', 'veo3.1', 'veo3.1-flash', 'veo3.1-lite'];
 
+export const GPT2API_VIDEO_DURATIONS = [6, 10, 20, 30];
+
 export const isGpt2apiImageModel = (id) => GPT2API_IMAGE_MODELS.includes(id);
 export const isGpt2apiVideoModel = (id) => GPT2API_VIDEO_MODELS.includes(id);
+
+export function normalizeGpt2apiVideoDuration(duration) {
+    const requested = Number(duration);
+    if (!Number.isFinite(requested)) return GPT2API_VIDEO_DURATIONS[0];
+
+    return [...GPT2API_VIDEO_DURATIONS]
+        .reverse()
+        .find(supported => supported <= requested)
+        || GPT2API_VIDEO_DURATIONS[0];
+}
+
+export function resolveGpt2apiVideoModel(requestedModel, configuredModel) {
+    if (isGpt2apiVideoModel(requestedModel)) return requestedModel;
+    if (isGpt2apiVideoModel(configuredModel)) return configuredModel;
+    return 'xai/grok-imagine-video';
+}
 
 // 宽高比 → 基准像素尺寸（gpt2api 会按 quality 档自动放大到精确尺寸）
 const RATIO_TO_SIZE = {
@@ -444,7 +462,7 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
     const body = {
         model,
         prompt: prompt || '',
-        duration: duration || 6,
+        duration: normalizeGpt2apiVideoDuration(duration),
         async: true,
     };
     if (aspectRatio && aspectRatio !== 'Auto') body.ratio = aspectRatio;
