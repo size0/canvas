@@ -428,6 +428,41 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         }
     };
 
+    const handleDeleteDigitalHuman = async (human: DigitalHumanSelection, event?: React.MouseEvent) => {
+        event?.stopPropagation();
+        if (!human?.id) {
+            setError('无法删除：缺少数字人 ID（旧数据请重新上传后再删）');
+            return;
+        }
+        const isKidsDefault = (human.defaultFor || []).includes('kids')
+            || (human.tags || []).includes('童装默认');
+        const ok = window.confirm(
+            isKidsDefault
+                ? `确定删除童装默认数字人「${human.name}」？删除后需重新上传/绑定童装默认。`
+                : `确定删除数字人「${human.name}」？此操作不可恢复。`,
+        );
+        if (!ok) return;
+        setError('');
+        try {
+            const response = await fetch(`/api/digital-humans/${encodeURIComponent(human.id)}`, {
+                method: 'DELETE',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data?.error || '删除失败');
+            const list = await loadDigitalHumans();
+            if (selectedDigitalHuman?.id === human.id) {
+                const current = templates.find(t => t.id === templateId) || currentTemplate;
+                if (isKidsProductTemplate(current)) {
+                    setSelectedDigitalHuman(pickKidsDigitalHuman(list));
+                } else {
+                    setSelectedDigitalHuman(null);
+                }
+            }
+        } catch (err: any) {
+            setError(err?.message || '删除数字人失败');
+        }
+    };
+
     const selectedTalentRefs = selectedDigitalHuman
         ? Array.from(new Set([
             ...(selectedDigitalHuman.referenceImages || []),
@@ -770,6 +805,17 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                                                     设为童装默认
                                                 </button>
                                             )}
+                                            {selectedDigitalHuman.id && (
+                                                <button
+                                                    type="button"
+                                                    disabled={loading}
+                                                    onClick={() => handleDeleteDigitalHuman(selectedDigitalHuman)}
+                                                    className="flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] text-red-300 border border-red-500/40 hover:bg-red-500/15 disabled:opacity-40"
+                                                >
+                                                    <Trash2 size={10} />
+                                                    删除此卡
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                     <Check size={16} className="text-violet-300 shrink-0 mt-1" />
@@ -807,22 +853,37 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                                         human.coverUrl,
                                     ].filter(Boolean))).length;
                                     return (
-                                        <button
+                                        <div
                                             key={human.id || human.coverUrl}
-                                            type="button"
-                                            disabled={loading}
-                                            onClick={() => setSelectedDigitalHuman(human)}
-                                            title={isKidsDefault ? `${human.name}（童装默认 · ${refCount} 张图）` : `${human.name}（${refCount} 张图）`}
                                             className={`relative w-16 shrink-0 rounded-lg overflow-hidden border transition-colors ${selected ? 'border-violet-400 ring-1 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/40'}`}
                                         >
-                                            <img src={human.coverUrl} alt="" className="w-16 h-16 object-cover" />
-                                            <span className="block px-1 py-0.5 text-[9px] text-neutral-300 truncate bg-black/60">{human.name}</span>
+                                            <button
+                                                type="button"
+                                                disabled={loading}
+                                                onClick={() => setSelectedDigitalHuman(human)}
+                                                title={isKidsDefault ? `${human.name}（童装默认 · ${refCount} 张图）` : `${human.name}（${refCount} 张图）`}
+                                                className="w-full text-left disabled:opacity-50"
+                                            >
+                                                <img src={human.coverUrl} alt="" className="w-16 h-16 object-cover" />
+                                                <span className="block px-1 py-0.5 text-[9px] text-neutral-300 truncate bg-black/60">{human.name}</span>
+                                            </button>
                                             {isKidsDefault && (
-                                                <span className="absolute left-0.5 top-0.5 px-1 rounded text-[8px] bg-violet-600/90 text-white">童装</span>
+                                                <span className="absolute left-0.5 top-0.5 px-1 rounded text-[8px] bg-violet-600/90 text-white pointer-events-none">童装</span>
                                             )}
-                                            <span className="absolute right-0.5 bottom-5 px-1 rounded text-[8px] bg-black/70 text-neutral-200">{refCount}/4</span>
-                                            {selected && <Check size={12} className="absolute right-1 top-1 text-violet-200" />}
-                                        </button>
+                                            <span className="absolute right-0.5 bottom-5 px-1 rounded text-[8px] bg-black/70 text-neutral-200 pointer-events-none">{refCount}/4</span>
+                                            {selected && <Check size={12} className="absolute right-1 top-5 text-violet-200 pointer-events-none" />}
+                                            {human.id && (
+                                                <button
+                                                    type="button"
+                                                    disabled={loading}
+                                                    title="删除数字人卡"
+                                                    onClick={(e) => handleDeleteDigitalHuman(human, e)}
+                                                    className="absolute right-0.5 top-0.5 p-0.5 rounded bg-black/70 text-red-300 hover:bg-red-600/80 hover:text-white disabled:opacity-40"
+                                                >
+                                                    <Trash2 size={10} />
+                                                </button>
+                                            )}
+                                        </div>
                                     );
                                 })}
                             </div>
