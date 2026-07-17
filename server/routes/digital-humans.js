@@ -155,6 +155,30 @@ router.post('/', (req, res) => {
         const sources = Array.from(new Set([cover, ...rawImages].filter(Boolean))).slice(0, 4);
         const referenceImages = sources.map((url, index) => persistImage(req, url, id, index));
         const now = new Date().toISOString();
+        const tags = Array.isArray(body.tags)
+            ? body.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 12)
+            : [];
+        // 童装等行业可标记 defaultFor: ['kids']，一键成片切到童装模板时自动选用
+        let defaultFor = Array.isArray(body.defaultFor)
+            ? body.defaultFor.map(t => String(t).trim()).filter(Boolean).slice(0, 8)
+            : [];
+        if (body.setKidsDefault === true || tags.includes('童装默认')) {
+            if (!defaultFor.includes('kids')) defaultFor.push('kids');
+            if (!tags.includes('童装默认')) tags.push('童装默认');
+        }
+
+        const list = loadIndex(req);
+        // 童装默认同一时间只保留一个
+        if (defaultFor.includes('kids')) {
+            for (const item of list) {
+                if (Array.isArray(item.defaultFor) && item.defaultFor.includes('kids')) {
+                    item.defaultFor = item.defaultFor.filter(x => x !== 'kids');
+                    item.tags = Array.isArray(item.tags) ? item.tags.filter(t => t !== '童装默认') : [];
+                    item.updatedAt = now;
+                }
+            }
+        }
+
         const entry = {
             id,
             name,
@@ -162,14 +186,12 @@ router.post('/', (req, res) => {
             referenceImages,
             identityAnchor: String(body.identityAnchor || '').trim().slice(0, 800)
                 || `${name}，五官、发型、肤色、体态与气质严格以参考图为准，全片同一人物身份，禁止另造脸`,
-            tags: Array.isArray(body.tags)
-                ? body.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 12)
-                : [],
+            tags,
+            defaultFor,
             createdAt: now,
             updatedAt: now,
         };
 
-        const list = loadIndex(req);
         list.push(entry);
         saveIndex(req, list);
 
@@ -211,10 +233,27 @@ router.patch('/:id', (req, res) => {
 
         const body = req.body || {};
         const current = list[index];
+        const now = new Date().toISOString();
         if (body.name != null) current.name = String(body.name).trim().slice(0, 80) || current.name;
         if (body.identityAnchor != null) current.identityAnchor = String(body.identityAnchor).trim().slice(0, 800);
         if (Array.isArray(body.tags)) {
             current.tags = body.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 12);
+        }
+        if (Array.isArray(body.defaultFor)) {
+            current.defaultFor = body.defaultFor.map(t => String(t).trim()).filter(Boolean).slice(0, 8);
+        }
+        // 设为 / 取消 童装默认数字人（全库唯一）
+        if (body.setKidsDefault === true) {
+            for (const item of list) {
+                item.defaultFor = Array.isArray(item.defaultFor) ? item.defaultFor.filter(x => x !== 'kids') : [];
+                item.tags = Array.isArray(item.tags) ? item.tags.filter(t => t !== '童装默认') : [];
+                item.updatedAt = now;
+            }
+            current.defaultFor = [...(current.defaultFor || []).filter(x => x !== 'kids'), 'kids'];
+            current.tags = [...(current.tags || []).filter(t => t !== '童装默认'), '童装默认'];
+        } else if (body.setKidsDefault === false) {
+            current.defaultFor = (current.defaultFor || []).filter(x => x !== 'kids');
+            current.tags = (current.tags || []).filter(t => t !== '童装默认');
         }
         if (Array.isArray(body.referenceImages) && body.referenceImages.length) {
             const sources = body.referenceImages.filter(Boolean).slice(0, 4);
@@ -227,7 +266,7 @@ router.patch('/:id', (req, res) => {
             });
             current.coverUrl = current.referenceImages[0];
         }
-        current.updatedAt = new Date().toISOString();
+        current.updatedAt = now;
         list[index] = current;
         saveIndex(req, list);
         res.json(current);

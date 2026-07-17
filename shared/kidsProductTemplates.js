@@ -15,6 +15,9 @@ const KIDS_DEFAULTS = {
   aspectRatio: '9:16',
   videoDuration: 10,
   platform: '抖音',
+  // 一键成片：所有童装模板共用「童装默认」数字人（库内 defaultFor 含 kids 的那张卡）
+  digitalHumanBinding: 'kids',
+  requireDigitalHuman: true,
 };
 
 function makeKidsTemplate({
