@@ -10,6 +10,7 @@ import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
+import { selectVideoReferenceParents } from '../utils/videoReferences.js';
 
 interface UseGenerationProps {
     nodes: NodeData[];
@@ -255,12 +256,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 const imageParents = (node.parentIds || [])
                     .map(pid => nodes.find(n => n.id === pid))
                     .filter((parent): parent is NodeData => !!parent && parent.type === NodeType.IMAGE);
+                const videoReferenceParents = selectVideoReferenceParents(imageParents, node.adRole);
                 if (node.adRole !== 'concept-video') {
-                    imageParents.sort((a, b) => (a.shotIndex || 0) - (b.shotIndex || 0));
+                    videoReferenceParents.sort((a, b) => (a.shotIndex || 0) - (b.shotIndex || 0));
                 }
-                const imageParentIds = imageParents.map(parent => parent.id);
+                const imageParentIds = videoReferenceParents.map(parent => parent.id);
                 const orderedParentImages = Array.from(new Set(
-                    imageParents.map(parent => parent.resultUrl).filter((url): url is string => !!url)
+                    videoReferenceParents.map(parent => parent.resultUrl).filter((url): url is string => !!url)
                 )).slice(0, 8);
 
                 // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
@@ -339,9 +341,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     }
                 }
 
-                // Product concept videos use all generated keyframes in narrative order.
-                // Other video nodes remain backward compatible with the start/end fields.
-                if (orderedParentImages.length > 1) {
+                // The storyboard board is a planning contact sheet, not a start/end frame.
+                // Product concept videos therefore use only the original product references.
+                if (node.adRole === 'concept-video') {
+                    referenceImages = orderedParentImages.length > 1 ? orderedParentImages : undefined;
+                    imageBase64 = orderedParentImages[0];
+                    lastFrameBase64 = undefined;
+                } else if (orderedParentImages.length > 1) {
                     referenceImages = orderedParentImages;
                     imageBase64 = orderedParentImages[0];
                     lastFrameBase64 = orderedParentImages[orderedParentImages.length - 1];
