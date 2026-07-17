@@ -213,6 +213,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
     const [elapsed, setElapsed] = useState(0);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const talentInputRef = useRef<HTMLInputElement>(null);
+    const talentAppendInputRef = useRef<HTMLInputElement>(null);
     const promptInputRef = useRef<HTMLInputElement>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -310,43 +311,99 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
+    const readFilesAsDataUrls = (files: File[]) => Promise.all(files.map(file => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('读取图片失败'));
+        reader.readAsDataURL(file);
+    })));
+
+    /** 新建数字人卡：支持一次选 1～4 张参考图（第 1 张为封面） */
     const handleTalentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
+        const files = Array.from(event.target.files || [])
+            .filter(file => file.type.startsWith('image/'))
+            .slice(0, 4);
         event.target.value = '';
-        if (!file) return;
+        if (!files.length) {
+            setError('请选择 1～4 张图片（正脸 / 半身 / 侧脸等）');
+            return;
+        }
+        if (files.some(file => file.size > 8 * 1024 * 1024)) {
+            setError('单张数字人参考图不能超过 8 MB');
+            return;
+        }
         setUploadingTalent(true);
         setError('');
         try {
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = () => reject(new Error('读取图片失败'));
-                reader.readAsDataURL(file);
-            });
+            const dataUrls = await readFilesAsDataUrls(files);
             const kidsMode = isKidsProductTemplate(currentTemplate);
-            const name = file.name.replace(/\.[^.]+$/, '') || (kidsMode ? '童装默认数字人' : '数字人');
-            // 童装模板下首次上传：自动设为「童装默认」，以后所有童装工作流共用
-            const setAsKidsDefault = kidsMode && !digitalHumans.some(h =>
-                (h.defaultFor || []).includes('kids') || (h.tags || []).includes('童装默认')
-            );
+            const name = files[0].name.replace(/\.[^.]+$/, '') || (kidsMode ? '童装默认数字人' : '数字人');
+            // 童装模板下上传：设为「童装默认」，以后所有童装工作流共用这一张卡
+            const setAsKidsDefault = kidsMode;
             const response = await fetch('/api/digital-humans', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name,
-                    coverUrl: dataUrl,
-                    referenceImages: [dataUrl],
-                    setKidsDefault: setAsKidsDefault || kidsMode,
-                    tags: (setAsKidsDefault || kidsMode) ? ['童装默认'] : [],
-                    defaultFor: (setAsKidsDefault || kidsMode) ? ['kids'] : [],
+                    coverUrl: dataUrls[0],
+                    referenceImages: dataUrls,
+                    setKidsDefault: setAsKidsDefault,
+                    tags: setAsKidsDefault ? ['童装默认'] : [],
+                    defaultFor: setAsKidsDefault ? ['kids'] : [],
                 }),
             });
             const created = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(created?.error || '上传数字人失败');
             const list = await loadDigitalHumans();
-            setSelectedDigitalHuman(created.id ? created : pickKidsDigitalHuman(list));
+            setSelectedDigitalHuman(
+                (created.id && list.find(h => h.id === created.id))
+                || (created.id ? created : pickKidsDigitalHuman(list)),
+            );
         } catch (err: any) {
             setError(err?.message || '上传数字人失败');
+        } finally {
+            setUploadingTalent(false);
+        }
+    };
+
+    /** 给当前选中的数字人卡追加参考图（最多凑满 4 张） */
+    const handleTalentAppend = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const human = selectedDigitalHuman;
+        if (!human?.id) {
+            setError('请先选择一个数字人，再追加参考图');
+            event.target.value = '';
+            return;
+        }
+        const existing = human.referenceImages?.length || (human.coverUrl ? 1 : 0);
+        const room = Math.max(0, 4 - existing);
+        const files = Array.from(event.target.files || [])
+            .filter(file => file.type.startsWith('image/'))
+            .slice(0, room || 1);
+        event.target.value = '';
+        if (!room) {
+            setError('该数字人已有 4 张参考图，无法再追加');
+            return;
+        }
+        if (!files.length) return;
+        if (files.some(file => file.size > 8 * 1024 * 1024)) {
+            setError('单张数字人参考图不能超过 8 MB');
+            return;
+        }
+        setUploadingTalent(true);
+        setError('');
+        try {
+            const dataUrls = await readFilesAsDataUrls(files);
+            const response = await fetch(`/api/digital-humans/${encodeURIComponent(human.id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ appendReferenceImages: dataUrls }),
+            });
+            const updated = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(updated?.error || '追加参考图失败');
+            const list = await loadDigitalHumans();
+            setSelectedDigitalHuman(list.find(h => h.id === human.id) || updated);
+        } catch (err: any) {
+            setError(err?.message || '追加参考图失败');
         } finally {
             setUploadingTalent(false);
         }
@@ -370,6 +427,13 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
             setError(err?.message || '设为童装默认失败');
         }
     };
+
+    const selectedTalentRefs = selectedDigitalHuman
+        ? Array.from(new Set([
+            ...(selectedDigitalHuman.referenceImages || []),
+            selectedDigitalHuman.coverUrl,
+        ].filter(Boolean))).slice(0, 4)
+        : [];
 
     useEffect(() => () => {
         if (timerRef.current) clearInterval(timerRef.current);
@@ -631,52 +695,103 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                                     onClick={() => talentInputRef.current?.click()}
                                     disabled={loading || uploadingTalent}
                                     className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-violet-200 border border-violet-500/30 hover:bg-violet-500/10 disabled:opacity-40"
+                                    title="一次可选 1～4 张：正脸 / 半身 / 侧脸 / 全身"
                                 >
                                     {uploadingTalent ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-                                    {isKidsProductTemplate(currentTemplate) ? '上传/更换童装默认' : '上传新人'}
+                                    {isKidsProductTemplate(currentTemplate) ? '新建/更换童装默认' : '新建数字人'}
                                 </button>
-                                <input ref={talentInputRef} type="file" accept="image/*" className="hidden" onChange={handleTalentUpload} />
+                                <input
+                                    ref={talentInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="hidden"
+                                    onChange={handleTalentUpload}
+                                />
+                                <input
+                                    ref={talentAppendInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="hidden"
+                                    onChange={handleTalentAppend}
+                                />
                             </div>
                         </div>
                         {isKidsProductTemplate(currentTemplate) && (
                             <div className="mb-2 text-[11px] text-violet-200/80 rounded-lg border border-violet-500/20 bg-violet-500/10 px-2.5 py-1.5">
-                                所有「童装·…」模板共用同一个数字人。上传一次并设为默认后，妈妈随手拍 / 跳舞 / 出门穿搭 / 选衣分享都会自动用 ta。
+                                所有「童装·…」模板共用同一个数字人卡。一张卡可含 <b className="text-violet-100">1～4 张参考图</b>（建议：正脸 + 半身 + 侧脸）。妈妈随手拍 / 跳舞 / 出门穿搭 / 选衣分享都会自动用这张卡。
+                            </div>
+                        )}
+                        {!isKidsProductTemplate(currentTemplate) && (
+                            <div className="mb-2 text-[11px] text-neutral-500">
+                                一个数字人 = 一张卡，卡内可有 <b className="text-neutral-300">1～4 张图</b>。新建时可多选；已有卡可点「追加参考图」。
                             </div>
                         )}
                         {selectedDigitalHuman ? (
-                            <div className="flex items-center gap-3 rounded-lg border border-violet-500/40 bg-black/30 p-2">
-                                <img src={selectedDigitalHuman.coverUrl} alt="" className="w-14 h-14 rounded-lg object-cover border border-white/10" />
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1.5 text-xs text-violet-100 font-medium truncate">
-                                        <span className="truncate">{selectedDigitalHuman.name}</span>
-                                        {((selectedDigitalHuman.defaultFor || []).includes('kids')
-                                            || (selectedDigitalHuman.tags || []).includes('童装默认')) && (
-                                            <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] bg-violet-500/30 text-violet-100 border border-violet-400/30">童装默认</span>
-                                        )}
+                            <div className="rounded-lg border border-violet-500/40 bg-black/30 p-2 space-y-2">
+                                <div className="flex items-start gap-3">
+                                    <img src={selectedDigitalHuman.coverUrl} alt="" className="w-14 h-14 rounded-lg object-cover border border-white/10 shrink-0" />
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5 text-xs text-violet-100 font-medium">
+                                            <span className="truncate">{selectedDigitalHuman.name}</span>
+                                            {((selectedDigitalHuman.defaultFor || []).includes('kids')
+                                                || (selectedDigitalHuman.tags || []).includes('童装默认')) && (
+                                                <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] bg-violet-500/30 text-violet-100 border border-violet-400/30">童装默认</span>
+                                            )}
+                                            <span className="shrink-0 text-[10px] text-neutral-500 font-normal">
+                                                {selectedTalentRefs.length}/4 张参考
+                                            </span>
+                                        </div>
+                                        <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
+                                            {selectedDigitalHuman.identityAnchor || '后续分镜/成片中人物外貌将锁定此数字人'}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                            {selectedDigitalHuman.id && selectedTalentRefs.length < 4 && (
+                                                <button
+                                                    type="button"
+                                                    disabled={loading || uploadingTalent}
+                                                    onClick={() => talentAppendInputRef.current?.click()}
+                                                    className="px-2 py-0.5 rounded-md text-[10px] text-violet-200 border border-violet-500/40 hover:bg-violet-500/15 disabled:opacity-40"
+                                                >
+                                                    追加参考图
+                                                </button>
+                                            )}
+                                            {selectedDigitalHuman.id && !(
+                                                (selectedDigitalHuman.defaultFor || []).includes('kids')
+                                                || (selectedDigitalHuman.tags || []).includes('童装默认')
+                                            ) && (
+                                                <button
+                                                    type="button"
+                                                    disabled={loading}
+                                                    onClick={() => handleSetKidsDefault(selectedDigitalHuman)}
+                                                    className="px-2 py-0.5 rounded-md text-[10px] text-violet-200 border border-violet-500/40 hover:bg-violet-500/15"
+                                                >
+                                                    设为童装默认
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
-                                        {selectedDigitalHuman.identityAnchor || '后续分镜/成片中人物外貌将锁定此数字人'}
-                                    </div>
+                                    <Check size={16} className="text-violet-300 shrink-0 mt-1" />
                                 </div>
-                                {selectedDigitalHuman.id && !(
-                                    (selectedDigitalHuman.defaultFor || []).includes('kids')
-                                    || (selectedDigitalHuman.tags || []).includes('童装默认')
-                                ) && (
-                                    <button
-                                        type="button"
-                                        disabled={loading}
-                                        onClick={() => handleSetKidsDefault(selectedDigitalHuman)}
-                                        className="shrink-0 px-2 py-1 rounded-md text-[10px] text-violet-200 border border-violet-500/40 hover:bg-violet-500/15"
-                                    >
-                                        设为童装默认
-                                    </button>
+                                {/* 卡内多图预览 */}
+                                {selectedTalentRefs.length > 0 && (
+                                    <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                                        {selectedTalentRefs.map((url, index) => (
+                                            <div key={url} className="relative w-12 h-12 shrink-0 rounded-md overflow-hidden border border-white/10">
+                                                <img src={url} alt={`参考 ${index + 1}`} className="w-full h-full object-cover" />
+                                                {index === 0 && (
+                                                    <span className="absolute left-0 bottom-0 px-1 text-[8px] bg-black/70 text-violet-100">封面</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
-                                <Check size={16} className="text-violet-300 shrink-0" />
                             </div>
                         ) : (
                             <div className="text-[11px] text-neutral-500 mb-2">
                                 {isKidsProductTemplate(currentTemplate)
-                                    ? '请上传一张固定儿童形象，将作为所有童装工作流的唯一数字人。'
+                                    ? '请一次选 1～4 张固定儿童形象（正脸优先），将作为所有童装工作流的唯一数字人。'
                                     : '未选择时行为与原先一致；选择后全片人物以数字人为准，产品仍以产品图为准。'}
                             </div>
                         )}
@@ -687,13 +802,17 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                                         || selectedDigitalHuman?.coverUrl === human.coverUrl;
                                     const isKidsDefault = (human.defaultFor || []).includes('kids')
                                         || (human.tags || []).includes('童装默认');
+                                    const refCount = Array.from(new Set([
+                                        ...(human.referenceImages || []),
+                                        human.coverUrl,
+                                    ].filter(Boolean))).length;
                                     return (
                                         <button
                                             key={human.id || human.coverUrl}
                                             type="button"
                                             disabled={loading}
                                             onClick={() => setSelectedDigitalHuman(human)}
-                                            title={isKidsDefault ? `${human.name}（童装默认）` : human.name}
+                                            title={isKidsDefault ? `${human.name}（童装默认 · ${refCount} 张图）` : `${human.name}（${refCount} 张图）`}
                                             className={`relative w-16 shrink-0 rounded-lg overflow-hidden border transition-colors ${selected ? 'border-violet-400 ring-1 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/40'}`}
                                         >
                                             <img src={human.coverUrl} alt="" className="w-16 h-16 object-cover" />
@@ -701,6 +820,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                                             {isKidsDefault && (
                                                 <span className="absolute left-0.5 top-0.5 px-1 rounded text-[8px] bg-violet-600/90 text-white">童装</span>
                                             )}
+                                            <span className="absolute right-0.5 bottom-5 px-1 rounded text-[8px] bg-black/70 text-neutral-200">{refCount}/4</span>
                                             {selected && <Check size={12} className="absolute right-1 top-1 text-violet-200" />}
                                         </button>
                                     );
@@ -708,7 +828,7 @@ export const ProductWorkflowModal: React.FC<ProductWorkflowModalProps> = ({ isOp
                             </div>
                         )}
                         {digitalHumans.length === 0 && !selectedDigitalHuman && (
-                            <div className="mt-1 text-[11px] text-neutral-600">数字人库为空。可点「上传新人」，或先在左侧素材库「数字人」分类入库。</div>
+                            <div className="mt-1 text-[11px] text-neutral-600">数字人库为空。可点「新建数字人」一次选 1～4 张图建卡。</div>
                         )}
                     </section>
 

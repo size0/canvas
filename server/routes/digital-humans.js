@@ -255,7 +255,24 @@ router.patch('/:id', (req, res) => {
             current.defaultFor = (current.defaultFor || []).filter(x => x !== 'kids');
             current.tags = (current.tags || []).filter(t => t !== '童装默认');
         }
-        if (Array.isArray(body.referenceImages) && body.referenceImages.length) {
+        // 追加参考图（最多 4 张，不覆盖已有）
+        if (Array.isArray(body.appendReferenceImages) && body.appendReferenceImages.length) {
+            const existing = Array.isArray(current.referenceImages) ? current.referenceImages.filter(Boolean) : [];
+            const room = Math.max(0, 4 - existing.length);
+            if (room === 0) {
+                return res.status(400).json({ error: '该数字人已有 4 张参考图，无法再追加' });
+            }
+            const toAdd = body.appendReferenceImages.filter(Boolean).slice(0, room).map((url, i) => {
+                try {
+                    return persistImage(req, url, current.id, `a${Date.now()}_${i}`);
+                } catch {
+                    return url;
+                }
+            });
+            current.referenceImages = [...existing, ...toAdd].slice(0, 4);
+            if (!current.coverUrl) current.coverUrl = current.referenceImages[0];
+        } else if (Array.isArray(body.referenceImages) && body.referenceImages.length) {
+            // 全量替换参考图（最多 4 张）
             const sources = body.referenceImages.filter(Boolean).slice(0, 4);
             current.referenceImages = sources.map((url, i) => {
                 try {
