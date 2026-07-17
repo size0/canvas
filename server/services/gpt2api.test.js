@@ -16,23 +16,25 @@ function jsonResponse(body, status = 200, headers = {}) {
 }
 
 
-test('normalizes video duration to the current GPT2API contract without increasing cost', () => {
-    assert.equal(normalizeGpt2apiVideoDuration(6), 6);
-    assert.equal(normalizeGpt2apiVideoDuration(10), 10);
-    assert.equal(normalizeGpt2apiVideoDuration(15), 10);
-    assert.equal(normalizeGpt2apiVideoDuration(20), 20);
-    assert.equal(normalizeGpt2apiVideoDuration(30), 30);
-    assert.equal(normalizeGpt2apiVideoDuration(31), 30);
-    assert.equal(normalizeGpt2apiVideoDuration('invalid'), 6);
+test('normalizes video duration using each model contract', () => {
+    assert.equal(normalizeGpt2apiVideoDuration(15, 'xai/grok-imagine-video'), 10);
+    assert.equal(normalizeGpt2apiVideoDuration(20, 'grok-imagine-video'), 20);
+    assert.equal(normalizeGpt2apiVideoDuration(10, 'sora'), 8);
+    assert.equal(normalizeGpt2apiVideoDuration(12, 'sora'), 12);
+    assert.equal(normalizeGpt2apiVideoDuration(7, 'veo3.1'), 6);
+    assert.equal(normalizeGpt2apiVideoDuration(8, 'veo3.1-flash'), 8);
+    assert.equal(normalizeGpt2apiVideoDuration(31, 'xai/grok-imagine-video'), 30);
+    assert.equal(normalizeGpt2apiVideoDuration('invalid', 'sora'), 4);
     assert.equal(normalizeGpt2apiVideoDuration(), 6);
 });
 
 test('resolves stale configured video models to a supported fallback', () => {
     assert.equal(resolveGpt2apiVideoModel('sora', 'veo3.1'), 'sora');
+    assert.equal(resolveGpt2apiVideoModel('xai/grok-imagine-video', null), 'grok-imagine-video');
     assert.equal(resolveGpt2apiVideoModel('unknown-model', 'veo3.1'), 'veo3.1');
     assert.equal(
         resolveGpt2apiVideoModel(null, 'grok-imagine-video-1.5-fast'),
-        'xai/grok-imagine-video',
+        'grok-imagine-video',
     );
 });
 
@@ -63,7 +65,7 @@ test('sends a normalized duration to the current GPT2API video endpoint', async 
             prompt: 'animate the product',
             duration: 15,
             resolution: '720p',
-            model: 'xai/grok-imagine-video',
+            model: 'grok-imagine-video',
             baseUrl: 'https://gateway.example/v1',
             apiKey: 'test-key',
         });

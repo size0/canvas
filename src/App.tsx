@@ -1247,7 +1247,7 @@ export default function App() {
         productReferenceUrls: productImages,
         videoDuration,
         videoMode: 'multi-keyframe',
-        videoModel: 'xai/grok-imagine-video',
+        videoModel: 'grok-imagine-video',
         generateAudio: opts.generateVoiceover,
         groupId,
         campaignId,

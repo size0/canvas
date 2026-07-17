@@ -264,7 +264,7 @@ router.post('/generate-video', async (req, res) => {
             }
             // 节点上选择的模型优先；其次「设置」里的模型；都没有则使用已验证可用的 Grok 别名。
             const resolvedVideoModel = resolveGpt2apiVideoModel(videoModel, VIDEO_MODEL);
-            const resolvedVideoDuration = normalizeGpt2apiVideoDuration(duration);
+            const resolvedVideoDuration = normalizeGpt2apiVideoDuration(duration, resolvedVideoModel);
             if (videoModel && videoModel !== resolvedVideoModel) {
                 console.warn('[gpt2api] Unsupported requested video model "' + videoModel + '", using "' + resolvedVideoModel + '"');
             } else if (!videoModel && VIDEO_MODEL && VIDEO_MODEL !== resolvedVideoModel) {

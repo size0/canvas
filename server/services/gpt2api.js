@@ -16,24 +16,36 @@ export const GPT2API_IMAGE_MODELS = ['nano-banana-pro', 'nano-banana-v2', 'nano-
 export const GPT2API_VIDEO_MODELS = ['xai/grok-imagine-video', 'grok-imagine-video', 'sora', 'veo3.1', 'veo3.1-flash', 'veo3.1-lite'];
 
 export const GPT2API_VIDEO_DURATIONS = [6, 10, 20, 30];
+export const GPT2API_VIDEO_DURATIONS_BY_MODEL = {
+    'xai/grok-imagine-video': GPT2API_VIDEO_DURATIONS,
+    'grok-imagine-video': GPT2API_VIDEO_DURATIONS,
+    'sora': [4, 8, 12],
+    'veo3.1': [4, 6, 8],
+    'veo3.1-flash': [4, 6, 8],
+    'veo3.1-lite': [4, 6, 8],
+};
 
 export const isGpt2apiImageModel = (id) => GPT2API_IMAGE_MODELS.includes(id);
 export const isGpt2apiVideoModel = (id) => GPT2API_VIDEO_MODELS.includes(id);
 
-export function normalizeGpt2apiVideoDuration(duration) {
+export function normalizeGpt2apiVideoDuration(duration, model) {
+    const supported = GPT2API_VIDEO_DURATIONS_BY_MODEL[model] || GPT2API_VIDEO_DURATIONS;
     const requested = Number(duration);
-    if (!Number.isFinite(requested)) return GPT2API_VIDEO_DURATIONS[0];
+    if (!Number.isFinite(requested)) return supported[0];
 
-    return [...GPT2API_VIDEO_DURATIONS]
+    return [...supported]
         .reverse()
-        .find(supported => supported <= requested)
-        || GPT2API_VIDEO_DURATIONS[0];
+        .find(value => value <= requested)
+        || supported[0];
 }
 
 export function resolveGpt2apiVideoModel(requestedModel, configuredModel) {
-    if (isGpt2apiVideoModel(requestedModel)) return requestedModel;
-    if (isGpt2apiVideoModel(configuredModel)) return configuredModel;
-    return 'xai/grok-imagine-video';
+    const normalizeAlias = model => model === 'xai/grok-imagine-video' ? 'grok-imagine-video' : model;
+    const requested = normalizeAlias(requestedModel);
+    const configured = normalizeAlias(configuredModel);
+    if (isGpt2apiVideoModel(requested)) return requested;
+    if (isGpt2apiVideoModel(configured)) return configured;
+    return 'grok-imagine-video';
 }
 
 // 宽高比 → 基准像素尺寸（gpt2api 会按 quality 档自动放大到精确尺寸）
@@ -462,7 +474,7 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
     const body = {
         model,
         prompt: prompt || '',
-        duration: normalizeGpt2apiVideoDuration(duration),
+        duration: normalizeGpt2apiVideoDuration(duration, model),
         async: true,
     };
     if (aspectRatio && aspectRatio !== 'Auto') body.ratio = aspectRatio;
