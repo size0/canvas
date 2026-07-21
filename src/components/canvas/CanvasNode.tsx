@@ -198,8 +198,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
     if (!data.resultUrl || libSaveState === 'saving' || libSaveState === 'saved') return;
     setLibSaveState('saving');
     const title = data.title || '';
-    const category = title.startsWith('数字人') ? 'Digital Human'
-      : title.startsWith('角色') ? 'Character'
+    const category = title.startsWith('角色') ? 'Character'
       : title.startsWith('场景') ? 'Scene'
         : title.startsWith('道具') ? 'Item'
           : 'Others';

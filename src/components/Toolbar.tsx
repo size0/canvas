@@ -9,7 +9,8 @@ import {
   Plus,
   Film,
   Scissors,
-  Wand2
+  Wand2,
+  Music2
 } from 'lucide-react';
 
 // ============================================================================
@@ -24,6 +25,7 @@ interface ToolbarProps {
   onStoryboardClick?: (e: React.MouseEvent) => void;
   onStoryWorkflowClick?: (e: React.MouseEvent) => void;
   onProductWorkflowClick?: (e: React.MouseEvent) => void;
+  onDigitalHumanDanceClick?: (e: React.MouseEvent) => void;
   onVideoStudioClick?: (e: React.MouseEvent) => void;
   onToolsOpen?: () => void; // Called when tools dropdown opens to close other panels
   canvasTheme?: 'dark' | 'light';
@@ -41,6 +43,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onStoryboardClick,
   onStoryWorkflowClick,
   onProductWorkflowClick,
+  onDigitalHumanDanceClick,
   onVideoStudioClick,
   onToolsOpen,
   canvasTheme = 'dark'
@@ -159,6 +162,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <div className="text-left">
                   <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>产品一键出片</p>
                   <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>产品图 → 多套营销成片</p>
+                </div>
+              </button>
+
+              {/* Digital Human Dance (数字人一键编舞) */}
+              <button
+                onClick={handleToolClick(onDigitalHumanDanceClick)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 transition-colors group ${isDark ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                  }`}
+              >
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-amber-500/25 to-emerald-500/20">
+                  <Music2 size={16} className="text-amber-300" />
+                </div>
+                <div className="text-left">
+                  <p className={`text-sm ${isDark ? 'text-neutral-200 group-hover:text-white' : 'text-neutral-700 group-hover:text-neutral-900'}`}>数字人一键编舞</p>
+                  <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>数字人 → 角色设定 → 首帧 → 成片</p>
                 </div>
               </button>
 

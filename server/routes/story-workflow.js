@@ -11,7 +11,7 @@
 
 import express from 'express';
 import { getKey } from '../config.js';
-import { gpt2apiChat, normalizeGpt2apiVideoDuration } from '../services/gpt2api.js';
+import { gpt2apiChat } from '../services/gpt2api.js';
 import { BUILTIN_TEMPLATES, SCREENPLAY_PROMPT, NARRATION_PROMPT, buildAssetPrompt, buildStoryboardPrompt } from './prompt-templates.js';
 import { analyzeScreenplayQuality } from '../utils/screenplay-quality.js';
 
@@ -99,7 +99,7 @@ router.post('/analyze', async (req, res) => {
         let truncated = false;
         if (text.length > MAX_INPUT) { text = text.slice(0, MAX_INPUT); truncated = true; }
 
-        const dur = normalizeGpt2apiVideoDuration(shotDuration);
+        const dur = Math.max(3, Math.min(15, Number(shotDuration) || 6));
         const isAuto = maxShots === 'auto' || maxShots === 'Auto';
         const shots = isAuto ? null : Math.max(3, Math.min(60, Number(maxShots) || 12));
         const ratioDesc = aspectRatio === '9:16'
@@ -192,7 +192,7 @@ router.post('/analyze', async (req, res) => {
             // 时长严格以用户选择的基准时长为准；仅当台词较长时按字数(约每秒3字)加长，避免 AI 自定义碎时长
             const dlgLen = s.dialogue.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, '').length;
             const dlgMin = dlgLen > 0 ? Math.ceil(dlgLen / 3) + 1 : 0;
-            s.duration = normalizeGpt2apiVideoDuration(Math.max(dur, dlgMin));
+            s.duration = Math.min(15, Math.max(dur, dlgMin));
         });
 
         // ===== 第 4 段：剧本 + 分镜 → 连贯解说旁白（解说体，写入剧本节点供整体配音） =====

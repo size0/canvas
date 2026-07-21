@@ -10,7 +10,6 @@ import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
-import { selectVideoReferenceParents } from '../utils/videoReferences.js';
 
 interface UseGenerationProps {
     nodes: NodeData[];
@@ -155,15 +154,6 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     }
                 }
 
-                // Digital human identity refs (face/body) — before product packaging refs
-                if (node.digitalHumanReferenceUrls && node.digitalHumanReferenceUrls.length > 0) {
-                    for (const talentUrl of node.digitalHumanReferenceUrls) {
-                        if (imageBase64s.length < 14 && !imageBase64s.includes(talentUrl)) {
-                            imageBase64s.push(talentUrl);
-                        }
-                    }
-                }
-
                 // Product references are always included for advertising shots so the
                 // model preserves packaging, logo, shape and color across concepts.
                 if (node.productReferenceUrls && node.productReferenceUrls.length > 0) {
@@ -265,13 +255,12 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 const imageParents = (node.parentIds || [])
                     .map(pid => nodes.find(n => n.id === pid))
                     .filter((parent): parent is NodeData => !!parent && parent.type === NodeType.IMAGE);
-                const videoReferenceParents = selectVideoReferenceParents(imageParents, node.adRole);
                 if (node.adRole !== 'concept-video') {
-                    videoReferenceParents.sort((a, b) => (a.shotIndex || 0) - (b.shotIndex || 0));
+                    imageParents.sort((a, b) => (a.shotIndex || 0) - (b.shotIndex || 0));
                 }
-                const imageParentIds = videoReferenceParents.map(parent => parent.id);
+                const imageParentIds = imageParents.map(parent => parent.id);
                 const orderedParentImages = Array.from(new Set(
-                    videoReferenceParents.map(parent => parent.resultUrl).filter((url): url is string => !!url)
+                    imageParents.map(parent => parent.resultUrl).filter((url): url is string => !!url)
                 )).slice(0, 8);
 
                 // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
@@ -350,13 +339,9 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     }
                 }
 
-                // The storyboard board is a planning contact sheet, not a start/end frame.
-                // Product concept videos therefore use only the original product references.
-                if (node.adRole === 'concept-video') {
-                    referenceImages = orderedParentImages.length > 1 ? orderedParentImages : undefined;
-                    imageBase64 = orderedParentImages[0];
-                    lastFrameBase64 = undefined;
-                } else if (orderedParentImages.length > 1) {
+                // Product concept videos use all generated keyframes in narrative order.
+                // Other video nodes remain backward compatible with the start/end fields.
+                if (orderedParentImages.length > 1) {
                     referenceImages = orderedParentImages;
                     imageBase64 = orderedParentImages[0];
                     lastFrameBase64 = orderedParentImages[orderedParentImages.length - 1];
@@ -429,6 +414,11 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
             if (msg.includes('permission_denied')) {
                 errorMessage = 'Permission denied. Check API Key configuration.';
+            } else if (
+                (msg.includes('content_policy_violation') || msg.includes('content policy') || msg.includes('安全策略'))
+                && node.adRole?.startsWith('dance-')
+            ) {
+                errorMessage = '上游安全策略拒绝了人物参考图。儿童数字人不能要求复刻现实未成年人身份；本工作流会使用原创虚构角色模式。若仍被拦截，请换用明确由 AI 生成、无真人来源的数字人卡。';
             } else if (msg.includes('unable to process input image') || msg.includes('invalid_argument')) {
                 errorMessage = '⚠️ Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';
             }

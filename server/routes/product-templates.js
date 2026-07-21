@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { BUILTIN_KIDS_PRODUCT_TEMPLATES } from '../../shared/kidsProductTemplates.js';
 
 const router = express.Router();
 
@@ -21,7 +20,7 @@ const COMMON_DEFAULTS = {
     conceptCount: 3,
     shotsPerConcept: 8,
     aspectRatio: '9:16',
-    videoDuration: 10,
+    videoDuration: 20,
     platform: '抖音',
 };
 
@@ -70,13 +69,15 @@ function makeTemplate(id, industry, focus, styleAnchor, extraRules = [], default
 分镜设计标准：
 1. 每个镜头明确叙事职责，并完整考虑景别、机位角度、镜头焦段感、构图、主体站位、动作、环境、光线、色彩、材质、运镜、节奏、旁白、字幕和转场。
 2. 镜头序列遵循建立—强调—证明—收束的视觉语法；相邻镜头至少改变景别、角度或运动中的两项，避免连续重复“商品摆拍”。
-3. imagePrompt 写可执行的中文静帧：产品锚点 + 场景 + 景别机位 + 构图 + 光线 + 材质；建议 200～450 字，不必写成超长散文，避免整段重复 DNA。
-4. videoPrompt 写起始状态、主体动作、单一运镜、节奏、结束状态与衔接；建议 150～350 字；一个镜头一种主运镜。
-5. 商品外形、包装、主色、材质、比例、Logo/标签位置保持参考图一致；商品清晰完整可识别。
-6. 可加简短负面约束；字幕只保留一个信息重点；旁白与画面同步。
-7. 同一创意关键帧场景光线连续，但每帧要有景别/构图/动作推进。
+3. imagePrompt 必须是可执行的中文静帧描述：先写产品一致性锚点，再写场景与主体关系、景别机位、构图、光线色温、材质细节、商业摄影质感和画幅留白。
+4. videoPrompt 必须基于该静帧描述起始状态、主体动作、镜头运动、速度、时间顺序、结束状态和与下一镜头的连续关系；禁止同时安排互相冲突的运镜。
+5. 每条提示词都要写明商品外形、包装、主色、材质、尺寸比例、Logo/标签位置保持参考图一致；商品始终清晰、完整、可识别，不得被手部或道具大面积遮挡。
+6. 每条提示词末尾加入负面约束：禁止商品变形、包装漂移、颜色改变、文字乱码、Logo 重复、凭空增加配件、手指异常、主体融合、镜头抖动、闪烁跳变、过度锐化和廉价塑料感。
+7. 字幕只保留一个信息重点，旁白必须与当前画面证据同步；转场写清匹配依据，如动作匹配、构图匹配、遮挡转场或音效切点。
+8. 同一创意的关键帧要像一组完整广告分镜：场景和光线连续，但每帧必须有明显的景别、构图、动作与叙事推进；禁止只在相同背景中轻微旋转产品。
+9. 全部关键帧最终会被排入一张与成片比例完全一致的高分辨率故事板母版，因此每帧描述必须遵守成片安全区，在缩略画格中仍有清晰主体、单一视觉重点和可辨认的动作，不堆叠过多微小元素。
 
-全部使用专业、自然、具体的中文。不得添加产品 DNA 未确认的功效、参数、认证、价格或优惠。`,
+全部使用专业、自然、具体的中文。不要堆砌互相矛盾的风格词，不要写无法被模型表现的抽象情绪，不得添加产品 DNA 未确认的功效、参数、认证、价格或优惠。`,
         styleAnchor,
         complianceRules: [...COMMON_COMPLIANCE, ...extraRules],
         defaults: { ...COMMON_DEFAULTS, ...defaults },
@@ -96,7 +97,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '瓶器形态、膏体或质地、肤感联想、使用步骤和目标人群',
         '高端美妆品牌广告，柔和透亮的漫射主光、精致轮廓高光与干净渐变背景，85mm 人像及 100mm 微距焦段感，真实瓶器玻璃/金属/磨砂材质，膏体液体纹理细腻，肤色自然不过度磨皮，包装颜色、泵头结构、文字版式始终一致，整体洁净、克制、奢华',
         ['不得宣称治疗皮肤疾病、速效美白、祛斑或其他无法证实的医疗功效'],
-        { videoDuration: 10 },
+        { videoDuration: 20 },
     ),
     makeTemplate(
         'builtin-food-beverage',
@@ -111,7 +112,7 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '工业设计、接口与部件、可见功能、操作流程、空间尺度和科技体验',
         '国际科技品牌发布片质感，低调冷色环境与精确条形轮廓光，35mm～85mm 电影镜头焦段感，金属、玻璃、塑料和屏幕反射符合真实物理规律，工业结构锐利而不过度锐化，空间尺度可信，机身尺寸、按键、接口、开孔和标识位置始终一致，避免科幻粒子滥用',
         ['参数、续航、性能、能效与防护等级只能使用用户明确提供的数据'],
-        { aspectRatio: '16:9', videoDuration: 10 },
+        { aspectRatio: '16:9', videoDuration: 20 },
     ),
     makeTemplate(
         'builtin-fashion-bags',
@@ -120,14 +121,13 @@ const BUILTIN_PRODUCT_TEMPLATES = [
         '高端时尚品牌 Campaign 质感，自然窗光或大面积柔光塑造立体轮廓，35mm 环境人像结合 85mm 细节焦段感，面料垂坠、针脚、皮革纹理与五金反射真实，肤色和商品颜色准确，造型简洁有编辑感，款式版型、图案、扣件和细节工艺始终一致',
         ['不得虚构材质成分、产地、设计师联名或奢侈品牌关系'],
     ),
-    ...BUILTIN_KIDS_PRODUCT_TEMPLATES,
     makeTemplate(
         'builtin-local-store',
         '本地生活/门店',
         '门店环境、服务过程、到店动线、招牌项目和真实可感知体验',
         '高品质本地生活纪实广告，真实门店环境与自然人物互动，24mm～35mm 环境建立镜头结合 50mm 服务细节，现场光与柔和补光平衡，肤色自然、空间通透、烟火气真实，动作不过度表演，招牌、菜单、陈设、工服和门店视觉识别保持一致',
         ['地址、营业时间、价格、优惠、服务范围和预约条件只能使用用户提供的信息'],
-        { conceptCount: 2, shotsPerConcept: 8, videoDuration: 10 },
+        { conceptCount: 2, shotsPerConcept: 8, videoDuration: 20 },
     ),
 ];
 

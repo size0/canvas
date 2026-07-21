@@ -16,6 +16,7 @@ import { resolveImageToBase64, saveBufferToFile } from '../utils/imageHelpers.js
 import {
     generateGpt2apiImage,
     generateGpt2apiVideo,
+    isGpt2apiImageModel,
     normalizeGpt2apiVideoDuration,
     resolveGpt2apiVideoModel,
 } from '../services/gpt2api.js';
@@ -262,18 +263,13 @@ router.post('/generate-video', async (req, res) => {
             if (!VIDEO_API_KEY) {
                 return res.status(500).json({ error: "未配置视频模型 KEY，请在「设置」中填写" });
             }
-            // 节点上选择的模型优先；其次「设置」里的模型；都没有则使用已验证可用的 Grok 别名。
+            // 节点选择优先，其次读取设置；无效/旧模型名统一回退到文档中的 Grok 模型。
             const resolvedVideoModel = resolveGpt2apiVideoModel(videoModel, VIDEO_MODEL);
-            const resolvedVideoDuration = normalizeGpt2apiVideoDuration(duration, resolvedVideoModel);
-            if (videoModel && videoModel !== resolvedVideoModel) {
-                console.warn('[gpt2api] Unsupported requested video model "' + videoModel + '", using "' + resolvedVideoModel + '"');
-            } else if (!videoModel && VIDEO_MODEL && VIDEO_MODEL !== resolvedVideoModel) {
-                console.warn('[gpt2api] Unsupported configured video model "' + VIDEO_MODEL + '", using "' + resolvedVideoModel + '"');
+            const resolvedDuration = normalizeGpt2apiVideoDuration(duration || 6, resolvedVideoModel);
+            if ((videoModel || VIDEO_MODEL) && (videoModel || VIDEO_MODEL) !== resolvedVideoModel) {
+                console.warn(`[gpt2api] Unsupported video model "${videoModel || VIDEO_MODEL}", using "${resolvedVideoModel}"`);
             }
-            if (Number(duration) !== resolvedVideoDuration) {
-                console.warn('[gpt2api] Unsupported video duration "' + duration + '", using ' + resolvedVideoDuration + 's');
-            }
-            console.log(`Using video model: ${resolvedVideoModel} @ ${VIDEO_API_URL}, duration: ${resolvedVideoDuration}s`);
+            console.log(`Using video model: ${resolvedVideoModel} @ ${VIDEO_API_URL}, duration: ${resolvedDuration}s`);
             videoBuffer = await generateGpt2apiVideo({
                 prompt,
                 imageBase64,
@@ -281,7 +277,7 @@ router.post('/generate-video', async (req, res) => {
                 referenceImages,
                 aspectRatio,
                 resolution,
-                duration: resolvedVideoDuration,
+                duration: resolvedDuration,
                 model: resolvedVideoModel,
                 baseUrl: VIDEO_API_URL,
                 apiKey: VIDEO_API_KEY,

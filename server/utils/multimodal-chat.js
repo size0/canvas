@@ -108,6 +108,9 @@ export async function multimodalChat({
     temperature = 0.4,
     retries = 3,
     onDelta,
+    model,
+    baseUrl,
+    label = '图片多模态分析',
 }) {
     const inputs = Array.isArray(imageUrls) && imageUrls.length
         ? imageUrls
@@ -136,13 +139,15 @@ export async function multimodalChat({
             maxTokens,
             temperature,
             onDelta,
-        }, { retries, label: '商品图片多模态分析' });
+            ...(model ? { model } : {}),
+            ...(baseUrl ? { baseUrl } : {}),
+        }, { retries, label });
     } catch (error) {
         const detail = String(error?.message || error);
         if (UNSUPPORTED_IMAGE.test(detail)) {
             throw new Error(`当前文字模型不支持图像输入，请在设置中选择支持视觉多模态的模型。上游信息：${detail}`);
         }
-        throw new Error(`商品图片多模态分析失败，未降级为纯文本分析。${detail}`);
+        throw new Error(`${label}失败，未降级为纯文本分析。${detail}`);
     }
 }
 

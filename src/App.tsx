@@ -15,10 +15,6 @@ import { LayoutGrid, RotateCcw, Square } from 'lucide-react';
 import { ContextMenu } from './components/ContextMenu';
 import { ContextMenuState, NodeData, NodeStatus, NodeType } from './types';
 import { generateImage, generateVideo } from './services/generationService';
-import {
-  buildCompactProductStoryboardPrompt,
-  buildCompactProductVideoPrompt,
-} from './utils/promptLimits';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
 import { useConnectionDragging } from './hooks/useConnectionDragging';
@@ -41,7 +37,6 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { extractVideoLastFrame } from './utils/videoHelpers';
-import { fetchJsonWithRetry } from './utils/fetchJsonWithRetry.js';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -61,6 +56,11 @@ import {
   ProductWorkflowOptions,
   ProductWorkflowResult,
 } from './components/modals/ProductWorkflowModal';
+import {
+  DigitalHumanDanceWorkflowModal,
+  DigitalHumanDanceWorkflowOptions,
+  DigitalHumanDanceWorkflowResult,
+} from './components/modals/DigitalHumanDanceWorkflowModal';
 import { VideoStudioPage } from './components/videoStudio/VideoStudioPage';
 import { AppDialogHost, showAppAlert } from './components/ui/AppDialog';
 import { DesktopTitleBar } from './components/ui/DesktopTitleBar';
@@ -86,18 +86,6 @@ const urlToBase64 = async (url: string): Promise<string> => {
     console.error("Error converting URL to base64:", e);
     return "";
   }
-};
-
-const GPT2API_VIDEO_DURATIONS = [6, 10, 20, 30];
-
-const normalizeGpt2apiVideoDuration = (duration: unknown): number => {
-  const requested = Number(duration);
-  if (!Number.isFinite(requested)) return GPT2API_VIDEO_DURATIONS[0];
-
-  return GPT2API_VIDEO_DURATIONS.reduce(
-    (supported, value) => value <= requested ? value : supported,
-    GPT2API_VIDEO_DURATIONS[0],
-  );
 };
 
 export default function App() {
@@ -304,6 +292,7 @@ export default function App() {
     cancelAllGenerations();
     storyAutoGenRef.current = null;
     productAutoGenRef.current = null;
+    danceAutoGenRef.current = null;
     cancelAllGenerations();
     await handleLoadWorkflow(id);
     setIsDirty(false);
@@ -495,6 +484,7 @@ export default function App() {
     cancelAllGenerations();
     storyAutoGenRef.current = null;
     productAutoGenRef.current = null;
+    danceAutoGenRef.current = null;
     setNodes([]);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
@@ -669,6 +659,7 @@ export default function App() {
   // ============================================================================
   const [isStoryWorkflowOpen, setIsStoryWorkflowOpen] = useState(false);
   const [isProductWorkflowOpen, setIsProductWorkflowOpen] = useState(false);
+  const [isDigitalHumanDanceOpen, setIsDigitalHumanDanceOpen] = useState(false);
 
   // 自动生图队列：先生成资产图，全部完成后再生成分镜图（分镜依赖资产图作图生图参考）。
   // 用并发上限的队列驱动（而非一次性全部触发）：浏览器对同一域名最多 6 个并发连接，
@@ -682,12 +673,19 @@ export default function App() {
     scope: 'images' | 'videos' | 'final';
     launched: Set<string>;
   } | null>(null);
+  const danceAutoGenRef = useRef<{
+    roleImageId: string;
+    firstFrameId: string;
+    videoId: string;
+    phase: 'role' | 'firstFrame' | 'video' | 'done';
+    launched: Set<string>;
+  } | null>(null);
 
   // 生成并发数：从「设置」读取（GEN_CONCURRENCY，1-20），默认 3
   const genConcurrencyRef = useRef(3);
   const refreshGenConcurrency = React.useCallback(async () => {
     try {
-      const data = await fetchJsonWithRetry('/api/settings');
+      const data = await fetch('/api/settings').then(r => r.json());
       const v = parseInt(data?.settings?.GEN_CONCURRENCY, 10);
       genConcurrencyRef.current = Number.isFinite(v) ? Math.min(20, Math.max(1, v)) : 3;
     } catch { /* 读取失败时沿用当前值 */ }
@@ -774,6 +772,48 @@ export default function App() {
     }
   }, [nodes]);
 
+  // 数字人一键编舞严格串行：角色设定图 → 精确首帧 → Grok 成片。
+  // 每一步都只使用上一步的成功结果，防止首帧未就绪时提前提交视频。
+  useEffect(() => {
+    const st = danceAutoGenRef.current;
+    if (!st || st.phase === 'done') return;
+    const currentId = st.phase === 'role'
+      ? st.roleImageId
+      : st.phase === 'firstFrame'
+        ? st.firstFrameId
+        : st.videoId;
+    const current = nodes.find(node => node.id === currentId);
+    if (!current) return;
+
+    if (current.status === NodeStatus.ERROR) {
+      const downstreamIds = st.phase === 'role'
+        ? [st.firstFrameId, st.videoId]
+        : st.phase === 'firstFrame'
+          ? [st.videoId]
+          : [];
+      const failedStage = st.phase === 'role' ? '角色设定图' : st.phase === 'firstFrame' ? '精确首帧' : 'Grok 视频';
+      st.phase = 'done';
+      if (downstreamIds.length) {
+        setNodes(prev => prev.map(node => downstreamIds.includes(node.id) && node.status !== NodeStatus.SUCCESS
+          ? { ...node, status: NodeStatus.ERROR, errorMessage: `${failedStage}生成失败，已停止后续步骤` }
+          : node));
+      }
+      return;
+    }
+
+    if (current.status === NodeStatus.SUCCESS) {
+      st.launched.clear();
+      st.phase = st.phase === 'role' ? 'firstFrame' : st.phase === 'firstFrame' ? 'video' : 'done';
+      if (st.phase !== 'done') setNodes(prev => [...prev]);
+      return;
+    }
+
+    if (current.status === NodeStatus.IDLE && !st.launched.has(currentId)) {
+      st.launched.add(currentId);
+      setTimeout(() => handleGenerateRef.current(currentId), 150);
+    }
+  }, [nodes, setNodes]);
+
   // 批量生成：图片/视频分开统计「未生成 / 失败 / 全部」，重置状态后交给并发队列
   const [isBatchGenOpen, setIsBatchGenOpen] = useState(false);
 
@@ -851,6 +891,7 @@ export default function App() {
     const targets = nodes.filter(n => (kind === 'image' ? isImageGenNode(n) : isVideoGenNode(n)) && matchScope(n, scope));
     if (targets.length === 0) return;
     productAutoGenRef.current = null;
+    danceAutoGenRef.current = null;
     cancelAllGenerations();
     await refreshGenConcurrency(); // 用「设置」里最新的并发数调度
     const ids = new Set(targets.map(n => n.id));
@@ -897,6 +938,7 @@ export default function App() {
   const handleStopAllGenerations = React.useCallback(() => {
     storyAutoGenRef.current = null; // 关键：清掉自动队列，避免继续调度下一批
     productAutoGenRef.current = null;
+    danceAutoGenRef.current = null;
     cancelAllGenerations();
     setNodes(prev => prev.map(n =>
       (n.type === NodeType.IMAGE || n.type === NodeType.VIDEO) && n.status === NodeStatus.LOADING
@@ -981,7 +1023,7 @@ export default function App() {
       ...defaults, id: crypto.randomUUID(), type: NodeType.VIDEO,
       title: `镜头 ${String(i + 1).padStart(2, '0')} 视频`, x: 0, y: 0,
       prompt: [shot.videoPrompt || shot.description || '', shot.dialogue ? `对白（含说话人）：\n${shot.dialogue}` : ''].filter(Boolean).join('\n'),
-      aspectRatio: ratio, videoDuration: normalizeGpt2apiVideoDuration(shot.duration), parentIds,
+      aspectRatio: ratio, videoDuration: Math.max(2, Math.min(15, Number(shot.duration) || 6)), parentIds,
     });
 
     // —— 分镜图片列 + 视频列（按关键帧模式构建）——
@@ -1079,32 +1121,27 @@ export default function App() {
   ) => {
     const GAP_X = 160;
     const ratio = opts.aspectRatio || '9:16';
-    const videoDuration = normalizeGpt2apiVideoDuration(opts.videoDuration);
     const campaignId = crypto.randomUUID();
     const productImages = Array.from(new Set((opts.productImages || []).filter(Boolean))).slice(0, 6);
     const productImage = productImages[0];
+    const digitalHumanImage = String(opts.digitalHumanImage || '').trim();
     if (!productImage) {
       showAppAlert('未找到产品参考图，请重新打开产品一键出片并添加图片。', { title: '产品一键出片' });
       return;
     }
-    const digitalHuman = opts.digitalHuman || (result as any).talent || null;
-    const digitalHumanImages = Array.from(new Set([
-      ...(Array.isArray(digitalHuman?.referenceImages) ? digitalHuman.referenceImages : []),
-      digitalHuman?.coverUrl,
-    ].filter(Boolean))).slice(0, 4) as string[];
-    const characterAnchor = String(
-      digitalHuman?.identityAnchor
-      || (digitalHumanImages.length
-        ? `${digitalHuman?.name || '数字人'}，五官、发型、肤色、体态与气质严格以数字人参考图为准，全片同一人物身份，禁止另造脸`
-        : ''),
-    );
     const productName = String(result.productDNA?.productName || opts.productName || '未命名产品');
     if (opts.generationScope !== 'nodes') {
       storyAutoGenRef.current = null;
       productAutoGenRef.current = null;
+      danceAutoGenRef.current = null;
       cancelAllGenerations();
     }
-    const consistencyAnchor = String(result.productDNA?.visualIdentity?.consistencyAnchor || '产品外观、包装、主色、材质、比例、Logo 与可见文字必须严格保持参考图一致');
+    const productConsistencyAnchor = String(result.productDNA?.visualIdentity?.consistencyAnchor || '产品外观、包装、主色、材质、比例、Logo 与可见文字必须严格保持参考图一致');
+    const digitalHumanConsistencyAnchor = digitalHumanImage
+      ? String(result.digitalHuman?.consistencyAnchor || '固定使用数字人卡片中的同一人物，脸型、五官、发型、发色、肤色、年龄呈现和体型比例全程一致；卡片服装只作人物身份参考，商品与造型以产品图和分镜为准')
+      : '';
+    const workflowConsistencyAnchor = [productConsistencyAnchor, digitalHumanConsistencyAnchor].filter(Boolean).join('；');
+    const normalizedVideoDuration = [6, 10, 20, 30].includes(Number(opts.videoDuration)) ? Number(opts.videoDuration) : 6;
     let baseX = nodes.length
       ? Math.max(...nodes.map(n => n.x + getNodeWidth(n))) + 320
       : 0;
@@ -1129,24 +1166,22 @@ export default function App() {
       campaignId,
       adRole: 'product-anchor',
     }));
-    const talentNodes: NodeData[] = digitalHumanImages.map((image, index) => ({
+    const digitalHumanNode: NodeData | null = digitalHumanImage ? {
       ...defaults,
       id: crypto.randomUUID(),
       type: NodeType.IMAGE,
-      title: index === 0
-        ? `数字人 · ${digitalHuman?.name || '出镜人物'}`
-        : `数字人参考 ${index + 1} · ${digitalHuman?.name || '出镜人物'}`,
+      title: '数字人卡片 · 固定人物',
       x: 0,
       y: 0,
-      prompt: characterAnchor,
+      prompt: digitalHumanConsistencyAnchor,
       status: NodeStatus.SUCCESS,
-      resultUrl: image,
+      resultUrl: digitalHumanImage,
       parentIds: [],
       campaignId,
-      adRole: 'talent-anchor' as const,
-      digitalHumanReferenceUrls: digitalHumanImages,
-      characterReferenceUrls: digitalHumanImages,
-    }));
+      adRole: 'digital-human-anchor',
+      characterReferenceUrls: [digitalHumanImage],
+    } : null;
+    const anchorNodes = [...productNodes, ...(digitalHumanNode ? [digitalHumanNode] : [])];
     const briefNode: NodeData = {
       ...defaults,
       id: crypto.randomUUID(),
@@ -1158,8 +1193,8 @@ export default function App() {
         `【产品】${productName}`,
         `【行业】${opts.industry || result.productDNA?.category || '通用电商'}`,
         `【平台】${opts.platform}`,
-        `【产品视觉锁定】${consistencyAnchor}`,
-        characterAnchor ? `【数字人人物锁定】${characterAnchor}` : '',
+        `【产品视觉锁定】${productConsistencyAnchor}`,
+        digitalHumanConsistencyAnchor ? `【数字人身份锁定】${digitalHumanConsistencyAnchor}` : '',
         `【产品 DNA】\n${JSON.stringify(result.productDNA || {}, null, 2)}`,
         opts.sellingPoints ? `【用户提供卖点】\n${opts.sellingPoints}` : '',
       ].filter(Boolean).join('\n\n'),
@@ -1226,7 +1261,7 @@ export default function App() {
       };
       directionNodes.push(directionNode);
 
-      const storyboardResolution = videoDuration >= 15 ? '4K' : '2K';
+      const storyboardResolution = opts.videoDuration >= 15 ? '4K' : '2K';
       const storyboardNode: NodeData = {
         ...defaults,
         id: crypto.randomUUID(),
@@ -1234,25 +1269,19 @@ export default function App() {
         title: `故事板 ${nn} · ${concept.shots?.length || opts.shotsPerConcept} 格 / ${ratio} / ${storyboardResolution}`,
         x: 0,
         y: 0,
-        prompt: buildCompactProductStoryboardPrompt({
-          title: concept.title,
-          productName,
-          industry: opts.industry || result.productDNA?.category || '通用电商',
-          videoDuration,
-          aspectRatio: ratio,
-          consistencyAnchor,
-          characterAnchor: characterAnchor || undefined,
-          visualDirection: concept.visualDirection,
-          sceneWorld: concept.sceneWorld,
-          colorLighting: concept.colorLighting,
-          shots: concept.shots || [],
-        }),
+        prompt: concept.storyboardPrompt || [
+          `生成一张 ${storyboardResolution}、${ratio} 画幅专业广告故事板大图，母版方向与最终视频完全一致，不是单帧海报。`,
+          `故事板包含 ${concept.shots?.length || opts.shotsPerConcept} 个按时间顺序排列的 ${ratio} 成片构图画格。`,
+          `${workflowConsistencyAnchor}。`,
+          ...(concept.shots || []).map((shot, index) =>
+            `镜头${String(index + 1).padStart(2, '0')} ${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(opts.videoDuration, index * 2 + 2)}秒：${shot.imagePrompt}`
+          ),
+        ].filter(Boolean).join('\n'),
         aspectRatio: ratio,
         resolution: storyboardResolution,
-        parentIds: [directionNode.id, ...talentNodes.map(node => node.id), ...productNodes.map(node => node.id)],
+        parentIds: [directionNode.id, ...anchorNodes.map(node => node.id)],
+        characterReferenceUrls: digitalHumanImage ? [digitalHumanImage] : undefined,
         productReferenceUrls: productImages,
-        digitalHumanReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
-        characterReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
         klingReferenceMode: 'subject',
         klingSubjectIntensity: 90,
         groupId,
@@ -1272,24 +1301,27 @@ export default function App() {
         title: `成片 ${nn} · ${concept.title || '广告方案'}`,
         x: 0,
         y: 0,
-        prompt: buildCompactProductVideoPrompt({
-          productName,
-          videoDuration,
-          consistencyAnchor,
-          characterAnchor: characterAnchor || undefined,
-          visualDirection: concept.visualDirection,
-          rhythm: concept.rhythm,
-          voiceover: opts.generateVoiceover ? combinedVoiceover : '',
-          subtitles: opts.generateSubtitles ? combinedSubtitle : '',
-          shots: concept.shots || [],
-        }),
-        parentIds: [storyboardNode.id, ...talentNodes.map(node => node.id), ...productNodes.map(node => node.id)],
+        prompt: [
+          `${workflowConsistencyAnchor}。`,
+          concept.visualDirection ? `【视觉导演】${concept.visualDirection}` : '',
+          concept.rhythm ? `【整体节奏】${concept.rhythm}` : '',
+          digitalHumanImage
+            ? `第一张参考图是包含 ${concept.shots?.length || opts.shotsPerConcept} 格的完整故事板母版；第二张是数字人身份卡片，只用于锁定唯一人物；其余是产品原图，只用于锁定商品外观。请严格按画格编号和时间码演绎为一条 ${normalizedVideoDuration} 秒广告。`
+            : `第一张参考图是一张包含 ${concept.shots?.length || opts.shotsPerConcept} 格的完整故事板母版，请严格按画格编号和时间码演绎为一条 ${normalizedVideoDuration} 秒广告。后续参考图是产品原图，仅用于锁定产品外观。`,
+          ...(concept.shots || []).map((shot, index) =>
+            `【${shot.startSec ?? index * 2}-${shot.endSec ?? Math.min(opts.videoDuration, index * 2 + 2)}秒｜镜头 ${index + 1}】${shot.videoPrompt || shot.action || shot.shotPurpose || '自然连续过渡'}`
+          ),
+          opts.generateVoiceover && combinedVoiceover ? `【完整中文口播】${combinedVoiceover}` : '',
+          opts.generateSubtitles && combinedSubtitle ? `【字幕文案】${combinedSubtitle}` : '',
+          '商品外观、包装结构、颜色、材质、比例、Logo 和可见文字全程不得漂移；禁止闪烁、跳切、产品变形和重复生成。',
+          digitalHumanImage ? '数字人的脸型、五官、发型、发色、肤色、年龄呈现和体型比例全程不得漂移；禁止换脸、变脸、增加人物或把卡片中的基础服装误当成商品。' : '',
+        ].filter(Boolean).join('\n'),
+        parentIds: [storyboardNode.id, ...(digitalHumanNode ? [digitalHumanNode.id] : []), ...productNodes.map(node => node.id)],
+        characterReferenceUrls: digitalHumanImage ? [digitalHumanImage] : undefined,
         productReferenceUrls: productImages,
-        digitalHumanReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
-        characterReferenceUrls: digitalHumanImages.length ? digitalHumanImages : undefined,
-        videoDuration,
+        videoDuration: normalizedVideoDuration,
         videoMode: 'multi-keyframe',
-        videoModel: 'grok-imagine-video',
+        videoModel: 'xai/grok-imagine-video',
         generateAudio: opts.generateVoiceover,
         groupId,
         campaignId,
@@ -1315,20 +1347,12 @@ export default function App() {
           styleAnchor: opts.styleAnchor || '',
           referenceImageUrl: productImage,
           referenceImageUrls: productImages,
-          digitalHuman: digitalHumanImages.length
-            ? {
-                id: digitalHuman?.id || null,
-                name: digitalHuman?.name || '数字人',
-                coverUrl: digitalHumanImages[0],
-                referenceImages: digitalHumanImages,
-                identityAnchor: characterAnchor,
-              }
-            : null,
+          digitalHumanImageUrl: digitalHumanImage || undefined,
           platform: opts.platform,
           aspectRatio: ratio,
           conceptCount: opts.conceptCount,
           shotsPerConcept: opts.shotsPerConcept,
-          videoDuration: videoDuration,
+          videoDuration: opts.videoDuration,
         },
       });
     });
@@ -1336,26 +1360,18 @@ export default function App() {
     // 高端紧凑布局：共享产品区在左，每套创意是一条横向阶段泳道。
     const laneGapY = 180;
     const stageGapX = 70;
-    const rowHeights = conceptRows.map(row => Math.max(...row.map(getNodeHeight)));
+    const rowHeights = conceptRows.map(row => Math.max(...row.map(node => getNodeHeight(node))));
     const totalLaneHeight = rowHeights.reduce((sum, height) => sum + height, 0)
       + laneGapY * Math.max(0, conceptRows.length - 1);
     let laneY = -totalLaneHeight / 2;
-    const productCellW = productNodes.length ? Math.max(...productNodes.map(getNodeWidth)) : 320;
-    const productCellH = productNodes.length ? Math.max(...productNodes.map(getNodeHeight)) : 320;
-    const talentCellW = talentNodes.length ? Math.max(...talentNodes.map(getNodeWidth)) : 0;
-    const talentCellH = talentNodes.length ? Math.max(...talentNodes.map(getNodeHeight)) : 0;
-    productNodes.forEach((node, index) => {
+    const productCellW = anchorNodes.length ? Math.max(...anchorNodes.map(node => getNodeWidth(node))) : 320;
+    const productCellH = anchorNodes.length ? Math.max(...anchorNodes.map(node => getNodeHeight(node))) : 320;
+    anchorNodes.forEach((node, index) => {
       node.x = baseX + (index % 2) * (productCellW + 32);
-      node.y = -((Math.ceil(productNodes.length / 2) * (productCellH + 32)) / 2) + Math.floor(index / 2) * (productCellH + 32);
+      node.y = -((Math.ceil(anchorNodes.length / 2) * (productCellH + 32)) / 2) + Math.floor(index / 2) * (productCellH + 32);
     });
-    const productGridWidth = Math.min(2, Math.max(1, productNodes.length)) * productCellW
-      + Math.max(0, Math.min(2, productNodes.length) - 1) * 32;
-    // 数字人锚点放在产品区下方
-    talentNodes.forEach((node, index) => {
-      node.x = baseX + (index % 2) * ((talentCellW || productCellW) + 32);
-      node.y = (productCellH * Math.ceil(Math.max(1, productNodes.length) / 2)) / 2 + 48
-        + Math.floor(index / 2) * ((talentCellH || productCellH) + 32);
-    });
+    const productGridWidth = Math.min(2, Math.max(1, anchorNodes.length)) * productCellW
+      + Math.max(0, Math.min(2, anchorNodes.length) - 1) * 32;
     briefNode.x = baseX + productGridWidth + GAP_X;
     briefNode.y = -getNodeHeight(briefNode) / 2;
     const laneStartX = briefNode.x + getNodeWidth(briefNode) + GAP_X;
@@ -1370,7 +1386,7 @@ export default function App() {
       laneY += rowHeight + laneGapY;
     });
 
-    const allNew = [...productNodes, ...talentNodes, briefNode, ...conceptNodes, ...directionNodes, ...imageNodes, ...videoNodes];
+    const allNew = [...anchorNodes, briefNode, ...conceptNodes, ...directionNodes, ...imageNodes, ...videoNodes];
     setNodes(prev => [...prev, ...allNew]);
     setGroups(prev => [...prev, ...newGroups]);
     setSelectedNodeIds(allNew.map(n => n.id));
@@ -1407,6 +1423,149 @@ export default function App() {
       };
     }
   }, [cancelAllGenerations, nodes, refreshGenConcurrency, setGroups, setNodes, setSelectedNodeIds, setViewport]);
+
+  const handleCreateDigitalHumanDanceWorkflow = React.useCallback((
+    result: DigitalHumanDanceWorkflowResult,
+    opts: DigitalHumanDanceWorkflowOptions
+  ) => {
+    if (!opts.digitalHumanImage) {
+      showAppAlert('未找到数字人图片，请重新上传。', { title: '数字人一键编舞' });
+      return;
+    }
+
+    cancelAllGenerations();
+    storyAutoGenRef.current = null;
+    productAutoGenRef.current = null;
+    danceAutoGenRef.current = null;
+
+    const campaignId = crypto.randomUUID();
+    const baseX = nodes.length
+      ? Math.max(...nodes.map(node => node.x + getNodeWidth(node))) + 320
+      : 0;
+    const stepX = 500;
+    const mainY = 0;
+    const textY = -420;
+    const defaults = {
+      status: NodeStatus.IDLE,
+      model: 'Banana Pro',
+      resolution: '2K',
+      aspectRatio: '9:16',
+      campaignId,
+    };
+
+    const anchorNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.IMAGE,
+      title: '数字人原图 · 创作参考',
+      x: baseX,
+      y: mainY,
+      prompt: '',
+      status: NodeStatus.SUCCESS,
+      resultUrl: opts.digitalHumanImage,
+      parentIds: [],
+      adRole: 'dance-digital-human-anchor',
+    };
+
+    const rolePlanNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.TEXT,
+      title: `角色设定 · ${result.roleSetting.theme}`,
+      x: baseX + stepX,
+      y: textY,
+      prompt: result.roleImagePrompt,
+      textMode: 'editing',
+      parentIds: [anchorNode.id],
+      adRole: 'dance-role-plan',
+    };
+
+    const roleImageNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.IMAGE,
+      title: '角色设定图 · 锁定人衣发景',
+      x: baseX + stepX,
+      y: mainY,
+      prompt: '根据连接的角色设定文字和数字人参考图，生成单张角色设定定稿图。',
+      parentIds: [anchorNode.id, rolePlanNode.id],
+      klingReferenceMode: 'subject',
+      klingSubjectIntensity: 90,
+      adRole: 'dance-role-image',
+    };
+
+    const firstFrameNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.IMAGE,
+      title: '精确首帧 · 9:16 起拍状态',
+      x: baseX + stepX * 2,
+      y: mainY,
+      prompt: result.firstFramePrompt,
+      parentIds: [roleImageNode.id],
+      klingReferenceMode: 'subject',
+      klingSubjectIntensity: 92,
+      adRole: 'dance-first-frame',
+    };
+
+    const storyboardNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.TEXT,
+      title: `编舞故事板 · ${result.storyboard.danceName}`,
+      x: baseX + stepX * 3,
+      y: textY,
+      prompt: result.videoPrompt,
+      textMode: 'editing',
+      parentIds: [firstFrameNode.id],
+      adRole: 'dance-storyboard',
+    };
+
+    const videoNode: NodeData = {
+      ...defaults,
+      id: crypto.randomUUID(),
+      type: NodeType.VIDEO,
+      title: `Grok 成片 · ${result.storyboard.danceName} · ${opts.duration}秒`,
+      x: baseX + stepX * 3,
+      y: mainY,
+      prompt: '',
+      parentIds: [firstFrameNode.id, storyboardNode.id],
+      resolution: '720p',
+      videoDuration: opts.duration,
+      videoMode: 'standard',
+      videoModel: result.videoModel || 'grok-imagine-video',
+      generateAudio: false,
+      adRole: 'dance-video',
+    };
+
+    const allNew = [anchorNode, rolePlanNode, roleImageNode, firstFrameNode, storyboardNode, videoNode];
+    setNodes(prev => [...prev, ...allNew]);
+    setSelectedNodeIds(allNew.map(node => node.id));
+
+    const minX = Math.min(...allNew.map(node => node.x));
+    const minY = Math.min(...allNew.map(node => node.y));
+    const maxX = Math.max(...allNew.map(node => node.x + getNodeWidth(node)));
+    const maxY = Math.max(...allNew.map(node => node.y + getNodeHeight(node)));
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const zoom = Math.min(1, Math.max(0.16, Math.min(
+      (window.innerWidth - 220) / Math.max(1, width),
+      (window.innerHeight - 220) / Math.max(1, height)
+    )));
+    setViewport({
+      x: (window.innerWidth - width * zoom) / 2 - minX * zoom,
+      y: (window.innerHeight - height * zoom) / 2 - minY * zoom,
+      zoom,
+    });
+
+    danceAutoGenRef.current = {
+      roleImageId: roleImageNode.id,
+      firstFrameId: firstFrameNode.id,
+      videoId: videoNode.id,
+      phase: 'role',
+      launched: new Set(),
+    };
+  }, [cancelAllGenerations, nodes, setNodes, setSelectedNodeIds, setViewport]);
 
   const handleEditStoryboard = React.useCallback((groupId: string) => {
     const group = groups.find(g => g.id === groupId);
@@ -2018,6 +2177,7 @@ export default function App() {
           onStoryboardClick={storyboardGenerator.openModal}
           onStoryWorkflowClick={() => setIsStoryWorkflowOpen(true)}
           onProductWorkflowClick={() => setIsProductWorkflowOpen(true)}
+          onDigitalHumanDanceClick={() => setIsDigitalHumanDanceOpen(true)}
           onVideoStudioClick={() => setIsVideoStudioOpen(true)}
           onToolsOpen={() => {
             closeWorkflowPanel();
@@ -2074,6 +2234,12 @@ export default function App() {
         isOpen={isProductWorkflowOpen}
         onClose={() => setIsProductWorkflowOpen(false)}
         onCreate={handleCreateProductWorkflow}
+      />
+
+      <DigitalHumanDanceWorkflowModal
+        isOpen={isDigitalHumanDanceOpen}
+        onClose={() => setIsDigitalHumanDanceOpen(false)}
+        onCreate={handleCreateDigitalHumanDanceWorkflow}
       />
 
       {/* Storyboard Generator Modal */}

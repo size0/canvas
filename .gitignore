@@ -29,6 +29,13 @@ twitcanva-config.json
 
 #env
 .env
+.env.*
+!.env.example
+
+# Local Codex runtime and backups
+.codex-backups/
+.codex-runtime/
+_codex-backup*/
 
 
 # data

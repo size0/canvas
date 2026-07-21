@@ -7,7 +7,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { Loader2, X, Eye, EyeOff } from 'lucide-react';
-import { fetchJsonWithRetry } from '../../utils/fetchJsonWithRetry.js';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -52,7 +51,7 @@ const GROUPS: GroupDef[] = [
         fields: [
             { key: 'VIDEO_API_URL', label: '网址 (Base URL)', placeholder: 'https://www.gpt2api.com/v1', hint: '接入地址，例如 https://www.gpt2api.com/v1' },
             { key: 'VIDEO_API_KEY', label: 'KEY (API Key)', hint: 'sk- 开头的密钥' },
-            { key: 'VIDEO_MODEL', label: '模型名', placeholder: 'grok-imagine-video', hint: '推荐 grok-imagine-video（时长 6/10/20/30 秒）。xai/grok-imagine-video 为官方 xAI 参数格式；sora 为 4/8/12；veo3.1* 为 4/6/8' },
+            { key: 'VIDEO_MODEL', label: '模型名', placeholder: 'xai/grok-imagine-video', hint: 'Grok 视频支持 6 / 10 / 20 / 30 秒；20/30 秒由后端自动拼接扩展' },
         ],
     },
     {
@@ -68,7 +67,7 @@ const GROUPS: GroupDef[] = [
         title: '生成设置',
         desc: '批量生成与一键创作的调度参数。',
         fields: [
-            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '2', hint: '同时打向上游的生图/生视频路数（1–3 有效）。gpt2api 多路并发时经常只跑 1 个、其余超时；建议 2。前端可同时点多个节点，服务端会排队' },
+            { key: 'GEN_CONCURRENCY', label: '生成并发数', placeholder: '3', hint: '同时进行的生图/生视频任务数，1-20。过大可能触发接口限流或导致预览加载失败，建议 3-8' },
         ],
     },
 ];
@@ -91,7 +90,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setError(null);
         setSavedTip(false);
         setLoading(true);
-        fetchJsonWithRetry('/api/settings')
+        fetch('/api/settings')
+            .then(res => res.json())
             .then(data => {
                 if (data && data.settings) setValues(data.settings);
             })

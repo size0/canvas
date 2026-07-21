@@ -5,10 +5,6 @@ import express from 'express';
 import { jsonrepair } from 'jsonrepair';
 import { getKey } from '../config.js';
 import { multimodalChat, textChat } from '../utils/multimodal-chat.js';
-import {
-    buildCompactBackendStoryboardPrompt,
-    compactProductShotPrompts,
-} from '../utils/product-prompt-limits.js';
 import { BUILTIN_PRODUCT_TEMPLATES, findProductTemplate } from './product-templates.js';
 
 const router = express.Router();
@@ -79,7 +75,7 @@ function normalizeProductDNA(raw, input) {
             consistencyAnchor: cleanString(
                 visual.consistencyAnchor || source?.consistencyAnchor,
                 `${input.productName || '商品'}，外观、包装、主色、材质、比例和可见标识严格以参考图为准`,
-                600,
+                800,
             ),
         },
         confirmedSellingPoints: cleanList(source?.confirmedSellingPoints || source?.sellingPoints || input.sellingPoints, 12),
@@ -191,20 +187,20 @@ function normalizeShots(raw, concepts, options) {
             const item = candidates[shotIndex] && typeof candidates[shotIndex] === 'object'
                 ? candidates[shotIndex]
                 : {};
-            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 100000);
-            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 100000);
+            let imagePrompt = cleanString(item.imagePrompt, fallback.imagePrompt, 2500);
+            let videoPrompt = cleanString(item.videoPrompt, fallback.videoPrompt, 3000);
             if (!HAN.test(imagePrompt)) imagePrompt = `中文广告画面：${imagePrompt}`;
             if (!HAN.test(videoPrompt)) videoPrompt = `中文视频镜头：${videoPrompt}`;
-            ({ imagePrompt, videoPrompt } = compactProductShotPrompts({
-                imagePrompt,
-                videoPrompt,
-                consistencyAnchor: options.consistencyAnchor,
-                characterAnchor: options.characterAnchor,
-                styleAnchor: options.styleAnchor,
-                visualDirection: concept.visualDirection,
-                sceneWorld: concept.sceneWorld,
-                colorLighting: concept.colorLighting,
-            }));
+            // 无论模型是否主动遵守，都把视觉一致性锚点写入每一个生成提示词。
+            if (!imagePrompt.includes(options.consistencyAnchor)) {
+                imagePrompt = `${options.styleAnchor}，${options.consistencyAnchor}。${imagePrompt}`;
+            }
+            if (concept.visualDirection && !imagePrompt.includes(concept.visualDirection)) {
+                imagePrompt = `本创意独立视觉导演方案：${concept.visualDirection}。场景世界：${concept.sceneWorld}。色彩灯光：${concept.colorLighting}。${imagePrompt}`;
+            }
+            if (!videoPrompt.includes(options.consistencyAnchor)) {
+                videoPrompt = `${options.consistencyAnchor}。${videoPrompt}`;
+            }
             const startSec = shotIndex * 2;
             const endSec = Math.min(options.videoDuration, startSec + 2);
             const beatDuration = durationForShot(options.videoDuration, shotIndex);
@@ -235,7 +231,7 @@ function promptValue(prompts, shortName, longName, fallback) {
     return cleanString(prompts?.[shortName] || prompts?.[longName], fallback, 20000);
 }
 
-function buildStoryboardBoardPrompt(concept, { videoDuration, aspectRatio, industry, productName, consistencyAnchor }) {
+function buildStoryboardBoardPrompt(concept, { videoDuration, aspectRatio, industry, productName, productConsistencyAnchor, digitalHumanConsistencyAnchor }) {
     const shots = Array.isArray(concept.shots) ? concept.shots : [];
     const count = shots.length;
     const portrait = aspectRatio === '9:16' || aspectRatio === '3:4';
@@ -264,7 +260,9 @@ function buildStoryboardBoardPrompt(concept, { videoDuration, aspectRatio, indus
 
 主体区域采用${grid}的严格网格，必须恰好包含 ${count} 个独立画格，不得为了填满网格增加空白镜头或第 ${count + 1} 格。每格都以 ${aspectRatio} 最终成片的安全区、主体大小和视觉重心进行构图，边框、间距、编号位置完全统一。镜号从镜头01连续到镜头${String(count).padStart(2, '0')}，不得重复、跳号或漏号；左上角只写镜号和数字时间码，画面下方只写一行极短简体中文注释。文字区域不得遮挡产品和人物。
 
-产品高保真锁定：${consistencyAnchor}。所有出现产品的画格必须是同一个真实产品，包装结构、颜色、材质、长宽比例、杯盖/接口/五金、Logo及可见文字位置完全一致；严禁变形、改色、复制出多个产品、增加不存在的部件或复杂图案。
+产品高保真锁定：${productConsistencyAnchor}。所有出现产品的画格必须是同一个真实产品，包装结构、颜色、材质、长宽比例、杯盖/接口/五金、Logo及可见文字位置完全一致；严禁变形、改色、复制出多个产品、增加不存在的部件或复杂图案。
+
+${digitalHumanConsistencyAnchor ? `数字人身份锁定：${digitalHumanConsistencyAnchor}。所有出现人物的画格必须是卡片中的同一人物；严禁换脸、变脸、年龄或体型漂移、增加人物，也不得把卡片中的基础服装当作商品事实。` : ''}
 
 同一创意视觉统一：${concept.visualDirection || ''}。场景世界：${concept.sceneWorld || ''}。色彩与灯光：${concept.colorLighting || ''}。道具策略：${concept.propStrategy || ''}。关键帧之间必须有明显叙事推进，禁止只在同一背景轻微旋转产品。
 
@@ -280,30 +278,13 @@ router.post('/analyze', async (req, res) => {
         ...(Array.isArray(body.productImageUrls) ? body.productImageUrls : []),
         body.productImageUrl,
     ].map(value => cleanString(value, '', 20_000_000)).filter(Boolean))).slice(0, 6);
+    const digitalHumanImageUrl = cleanString(body.digitalHumanImageUrl, '', 20_000_000);
+    const digitalHumanConsistencyAnchor = digitalHumanImageUrl
+        ? '固定使用数字人卡片中的同一人物，脸型、五官、发型、发色、肤色、年龄呈现和体型比例全程一致；卡片只提供人物身份与多角度特征，卡片中的基础服装不是商品事实，商品与造型以产品参考图和分镜要求为准'
+        : '';
     if (!productImageUrls.length) {
         return res.status(400).json({ error: '请至少提供一张产品参考图' });
     }
-
-    // 数字人（可选）：锁定出镜人物外貌，与产品参考图分轨
-    const digitalHumanBody = body.digitalHuman && typeof body.digitalHuman === 'object' ? body.digitalHuman : null;
-    const digitalHumanImages = Array.from(new Set([
-        ...(Array.isArray(digitalHumanBody?.referenceImages) ? digitalHumanBody.referenceImages : []),
-        digitalHumanBody?.coverUrl,
-    ].map(value => cleanString(value, '', 20_000_000)).filter(Boolean))).slice(0, 4);
-    const digitalHuman = digitalHumanImages.length
-        ? {
-            id: cleanString(digitalHumanBody?.id, '', 80) || null,
-            name: cleanString(digitalHumanBody?.name, '数字人', 80),
-            coverUrl: digitalHumanImages[0],
-            referenceImages: digitalHumanImages,
-            identityAnchor: cleanString(
-                digitalHumanBody?.identityAnchor,
-                `${cleanString(digitalHumanBody?.name, '数字人', 80)}，五官、发型、肤色、体态与气质严格以数字人参考图为准，全片同一人物身份，禁止另造脸`,
-                800,
-            ),
-        }
-        : null;
-    const characterAnchor = digitalHuman?.identityAnchor || '';
     if (!getKey('TEXT_API_KEY')) {
         return res.status(400).json({ error: '请先在设置中配置文字模型 API Key' });
     }
@@ -311,10 +292,9 @@ router.post('/analyze', async (req, res) => {
     const template = findProductTemplate(req, body.templateId, body.industry) || DEFAULT_TEMPLATE;
     const templateDefaults = template.defaults || {};
     const conceptCount = clampInt(body.conceptCount, 1, 8, templateDefaults.conceptCount || 3);
-    const supportedVideoDurations = [6, 10, 20, 30];
-    const videoDuration = supportedVideoDurations.includes(Number(body.videoDuration))
+    const videoDuration = [6, 10, 20, 30].includes(Number(body.videoDuration))
         ? Number(body.videoDuration)
-        : (supportedVideoDurations.includes(Number(templateDefaults.videoDuration)) ? Number(templateDefaults.videoDuration) : 10);
+        : ([6, 10, 20, 30].includes(Number(templateDefaults.videoDuration)) ? Number(templateDefaults.videoDuration) : 20);
     const shotsPerConcept = Math.ceil(videoDuration / 2);
     const timelineSpec = Array.from({ length: shotsPerConcept }, (_, index) => {
         const start = index * 2;
@@ -330,7 +310,7 @@ router.post('/analyze', async (req, res) => {
         sellingPoints: cleanList(body.sellingPoints, 20),
     };
     const prompts = body.prompts && typeof body.prompts === 'object' ? body.prompts : {};
-    const styleAnchor = cleanString(body.styleAnchor, template.styleAnchor, 800);
+    const styleAnchor = cleanString(body.styleAnchor, template.styleAnchor, 1500);
     const complianceRules = cleanList(prompts.complianceRules || template.complianceRules, 30);
     const analyzeSystem = promptValue(prompts, 'analyze', 'analyzePrompt', template.analyzePrompt);
     const conceptSystem = promptValue(prompts, 'concept', 'conceptPrompt', template.conceptPrompt);
@@ -350,7 +330,7 @@ router.post('/analyze', async (req, res) => {
         const dnaReply = await multimodalChat({
             system: `${analyzeSystem}
 
-强制要求：只输出 JSON；所有文字使用中文；商品图是产品视觉唯一事实来源。不得因商品名或卖点而臆造图中不存在的包装、参数、认证和功效。${digitalHuman ? '若同时提供了数字人参考图，仅用于理解出镜人物气质，不要用数字人外貌覆盖产品包装描述。' : ''}`,
+强制要求：只输出 JSON；所有文字使用中文；商品图是唯一视觉事实来源。不得因商品名或卖点而臆造图中不存在的包装、参数、认证和功效。`,
             prompt: `请分析商品图片并输出以下 JSON：
 {
   "productDNA": {
@@ -362,7 +342,7 @@ router.post('/analyze', async (req, res) => {
       "materials": ["可见材质"],
       "packaging": "包装结构、标签布局和辨识特征",
       "visibleText": ["图片中确实可辨认的文字"],
-      "consistencyAnchor": "供后续复用的视觉一致性描述（建议 80～200 字，够用即可）"
+      "consistencyAnchor": "供后续每个镜头复用的完整视觉一致性描述"
     },
     "confirmedSellingPoints": ["图片或用户资料可支持的卖点"],
     "targetAudience": ["目标受众"],
@@ -376,7 +356,6 @@ router.post('/analyze', async (req, res) => {
 商品名：${input.productName}
 卖点：${input.sellingPoints.join('；') || '未提供'}
 参考图数量：${productImageUrls.length} 张（请综合正面、侧面、包装细节等角度，识别同一产品的稳定视觉特征）
-${digitalHuman ? `数字人（出镜人物锁定，名：${digitalHuman.name}）：${characterAnchor}\n数字人参考图 ${digitalHumanImages.length} 张仅用于人物外貌，不得改写产品外观。` : '未指定数字人：创意中的人物可自由设计，但不要捏造产品。'}
 行业模板：${template.industry}
 合规规则：${complianceRules.join('；')}`,
             imageUrls: productImageUrls,
@@ -388,13 +367,17 @@ ${digitalHuman ? `数字人（出镜人物锁定，名：${digitalHuman.name}）
             },
         });
         const productDNA = normalizeProductDNA(parseStructuredJson(dnaReply, '产品 DNA 分析'), input);
+        const workflowConsistencyAnchor = [
+            productDNA.visualIdentity.consistencyAnchor,
+            digitalHumanConsistencyAnchor,
+        ].filter(Boolean).join('；');
 
         send({ type: 'status', stage: 2, message: '第 2/3 步：正在生成多套广告创意…' });
         const conceptReply = await textChat({
             system: `${conceptSystem}
 
 所有内容使用中文。创意必须彼此差异明显，且只能使用产品 DNA 中已确认的信息。遵守广告合规规则，禁止绝对化、疗效化、虚构参数和虚构优惠。
-${digitalHuman ? `已指定数字人「${digitalHuman.name}」：凡有人物出镜，外貌必须以该数字人为唯一真相，禁止另造脸或换角；产品包装仍只信产品 DNA。` : ''}
+${digitalHumanConsistencyAnchor ? '所有需要人物出镜的创意都使用同一个已上传数字人作为唯一人物主体；数字人卡片只锁定身份，不锁定卡片里的基础服装。' : ''}
 
 生成前在内部完成创意质检，但不要输出思考过程：
 - 每套创意是否只突出一个核心利益点，并对应一个真实购买动机；
@@ -412,7 +395,7 @@ ${digitalHuman ? `已指定数字人「${digitalHuman.name}」：凡有人物出
 风格锚点：${styleAnchor}
 合规规则：${complianceRules.join('；')}
 产品 DNA：${JSON.stringify(productDNA)}
-${digitalHuman ? `数字人锁定：${JSON.stringify({ name: digitalHuman.name, identityAnchor: characterAnchor })}` : ''}
+数字人：${digitalHumanConsistencyAnchor || '未启用'}
 
 输出字段要求：
 - title：简洁的内部创意名称，不作为画面文案；
@@ -439,32 +422,33 @@ JSON：
 
 强制要求：
 1. 所有提示词、字幕、旁白和转场均用中文。
-2. 每个镜头都要保证商品一致；包装、主色、材质、比例、标签位置不得漂移。
-3. imagePrompt 可写充分细节：产品锚点 + ${digitalHuman ? '数字人人物锚点 + ' : ''}镜头职责 + 场景 + 景别机位 + 构图 + 光线 + 材质。
-4. videoPrompt 可写充分细节：起始→一个动作→一种运镜→结束→衔接；禁止同时推拉摇移环绕。
-5. 关键帧连续，相邻镜至少改变景别、角度或运动中的两项。
-6. 字幕建议不超过 16 字；旁白与画面同步。
-7. 不得虚构认证、功效、价格、优惠。
-8. 不同 concept 布景与节奏要明显不同。
-${digitalHuman ? '9. 有人物出镜时，五官/发型/体态必须以数字人参考为准；禁止另造脸；禁止把人脸画到包装上。' : ''}
+2. 每个镜头都必须重复产品视觉一致性锚点；商品包装、主色、材质、尺寸比例、标签位置和可见标识不得漂移。
+3. imagePrompt 按“产品锚点→镜头职责→场景→景别/机位/焦段感→构图与主体位置→光线色温→材质细节→画幅与字幕安全区→负面约束”的顺序书写。
+4. videoPrompt 按“产品锚点→起始状态→主体动作→单一运镜→速度节奏→结束状态→连续性→负面约束”的顺序书写。一个镜头只使用一种主运镜，禁止同时推拉摇移环绕。
+5. 整条 ${videoDuration} 秒成片必须有足够但不过载的动作过程；关键帧之间在空间、光线、人物、道具和产品状态上连续。
+6. 每张关键帧的字幕只承载一个重点，建议不超过 16 个汉字；整条旁白约 ${Math.max(8, Math.floor(videoDuration * 3.5))}～${Math.ceil(videoDuration * 4)} 个汉字，并与关键帧序列同步。
+7. 每套分镜至少包含一次商品完整 Hero Shot 和一次能够证明卖点的特写/使用镜头；相邻镜头必须在景别、角度或运动中至少改变两项。
+8. 不得生成图片中没有的品牌背书、参数、功效、价格、优惠或认证。
+9. shots 是同一条视频的连续关键帧，不是相互独立的小视频。各帧必须有开始—发展—收束关系，并保持本创意的场景世界、色彩和光线连续。
+10. 不同 concept 必须使用明显不同的布景、构图体系、光线策略、道具组合和叙事节奏；禁止只改变手势或轻微角度后重复同一张产品摆拍。
+${digitalHumanConsistencyAnchor ? '11. 每个有人物出镜的 imagePrompt 和 videoPrompt 都必须重复数字人身份锁定；人物脸型、五官、发型、发色、肤色、年龄呈现和体型比例不得漂移，禁止增加第二个人物。' : ''}
 
-只输出严格 JSON。`,
+输出前在内部逐镜检查：商品是否一致、提示词是否可执行、动作是否适配时长、旁白是否匹配画面、镜头是否重复、负面约束是否完整。只输出严格 JSON。`,
             prompt: `请为每套创意生成恰好 ${shotsPerConcept} 张连续关键帧，并以这些关键帧直接生成一条约 ${videoDuration} 秒的完整视频。
 固定时间轴：${timelineSpec}
-每张关键帧覆盖自己的 startSec 到 endSec。每段 voiceover 大约按该段秒数 × 4 个汉字估算。
+每张关键帧必须覆盖自己的 startSec 到 endSec，不得合并、遗漏或改变顺序。每段 voiceover 最多为该段秒数 × 4 个汉字，整条旁白总长度不得超过 ${Math.ceil(videoDuration * 4)} 个汉字。
 平台：${platform}
 画幅：${aspectRatio}
 风格锚点：${styleAnchor}
 产品视觉一致性锚点：${productDNA.visualIdentity.consistencyAnchor}
-${digitalHuman ? `数字人人物一致性锚点：${characterAnchor}` : ''}
+数字人身份一致性锚点：${digitalHumanConsistencyAnchor || '未启用'}
 合规规则：${complianceRules.join('；')}
 产品 DNA：${JSON.stringify(productDNA)}
-${digitalHuman ? `数字人：${JSON.stringify({ name: digitalHuman.name, identityAnchor: characterAnchor })}` : ''}
 创意：${JSON.stringify(concepts)}
 
 输出：
-{"concepts":[{"id":"concept-1","shots":[{"index":1,"startSec":0,"endSec":2,"shotPurpose":"该时间段的叙事职责","scene":"具体场景与空间层次","shotSize":"景别","camera":"机位、角度与焦段感","composition":"构图与主体位置","action":"该时间段内完成的主体动作","imagePrompt":"专业中文生图提示词（建议200-450字）","videoPrompt":"动作与运镜提示词（建议150-350字）","duration":2,"subtitle":"不超过12-16字的单一重点字幕","voiceover":"符合该段时长的自然中文旁白","transition":"具体视觉衔接方式"}]}]}`,
-            maxTokens: Math.min(28000, 5000 + conceptCount * shotsPerConcept * 700),
+{"concepts":[{"id":"concept-1","shots":[{"index":1,"startSec":0,"endSec":2,"shotPurpose":"该时间段的叙事职责","scene":"具体场景与空间层次","shotSize":"景别","camera":"机位、角度与焦段感","composition":"构图与主体位置","action":"该时间段内完成的主体动作","imagePrompt":"完整专业中文生图提示词，含一致性锚点和负面约束","videoPrompt":"当前时间段及到下一关键帧的动作与运镜提示词","duration":2,"subtitle":"不超过12字的单一重点字幕","voiceover":"符合该段时长的自然中文旁白","transition":"具体视觉衔接方式"}]}]}`,
+            maxTokens: Math.min(30000, 5000 + conceptCount * shotsPerConcept * 900),
             temperature: 0.45,
             onDelta: (_delta, total) => {
                 if (total % 500 < 30) send({ type: 'progress', stage: 3, chars: total });
@@ -476,17 +460,16 @@ ${digitalHuman ? `数字人：${JSON.stringify({ name: digitalHuman.name, identi
             videoDuration,
             aspectRatio,
             styleAnchor,
-            consistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
-            characterAnchor,
+            consistencyAnchor: workflowConsistencyAnchor,
         }).map(concept => ({
             ...concept,
-            storyboardPrompt: buildCompactBackendStoryboardPrompt(concept, {
+            storyboardPrompt: buildStoryboardBoardPrompt(concept, {
                 videoDuration,
                 aspectRatio,
                 industry: template.industry,
                 productName: productDNA.productName,
-                consistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
-                characterAnchor,
+                productConsistencyAnchor: productDNA.visualIdentity.consistencyAnchor,
+                digitalHumanConsistencyAnchor,
             }),
         }));
 
@@ -494,12 +477,15 @@ ${digitalHuman ? `数字人：${JSON.stringify({ name: digitalHuman.name, identi
             type: 'done',
             data: {
                 title: `${productDNA.productName || '产品'}广告创意`,
-                summary: `为${platform}生成 ${normalizedConcepts.length} 套独立广告创意，每套把 ${shotsPerConcept} 格时间轴分镜合成一张故事板母版并直出一条成片${digitalHuman ? `；出镜人物锁定为数字人「${digitalHuman.name}」` : ''}`,
+                summary: `为${platform}生成 ${normalizedConcepts.length} 套独立广告创意，每套把 ${shotsPerConcept} 格时间轴分镜合成一张故事板母版并直出一条成片`,
                 styleAnchor,
                 templateId: template.id,
                 industry: template.industry,
                 productDNA,
-                talent: digitalHuman,
+                digitalHuman: {
+                    enabled: Boolean(digitalHumanImageUrl),
+                    consistencyAnchor: digitalHumanConsistencyAnchor,
+                },
                 concepts: normalizedConcepts,
             },
         });

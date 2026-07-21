@@ -21,25 +21,12 @@ interface AssetLibraryPanelProps {
 
 const DEFAULT_CATEGORIES = [
     'Character',
-    'Digital Human',
     'Scene',
     'Item',
     'Style',
     'Sound Effect',
     'Others'
 ];
-
-/** 分类显示名（存储仍用英文 id） */
-const CATEGORY_LABELS: Record<string, string> = {
-    'All': '全部',
-    'Character': '角色',
-    'Digital Human': '数字人',
-    'Scene': '场景',
-    'Item': '道具',
-    'Style': '风格',
-    'Sound Effect': '音效',
-    'Others': '其他',
-};
 
 export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
     isOpen,
@@ -337,13 +324,11 @@ const AssetLibraryContent = ({
                                 key={cat}
                                 onClick={() => setSelectedCategory(cat)}
                                 className={`group/cat shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${selectedCategory === cat
-                                    ? isDark
-                                        ? (cat === 'Digital Human' ? 'bg-violet-500 text-white border-violet-400' : 'bg-neutral-100 text-black border-white')
-                                        : (cat === 'Digital Human' ? 'bg-violet-600 text-white border-violet-600' : 'bg-neutral-900 text-white border-neutral-900')
+                                    ? isDark ? 'bg-neutral-100 text-black border-white' : 'bg-neutral-900 text-white border-neutral-900'
                                     : isDark ? 'bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-600' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
                                     }`}
                             >
-                                {CATEGORY_LABELS[cat] || cat}
+                                {cat}
                                 {cat !== 'All' && (
                                     <span
                                         onClick={(e) => { e.stopPropagation(); onDeleteCategory?.(cat); }}

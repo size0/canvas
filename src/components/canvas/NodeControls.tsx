@@ -36,12 +36,8 @@ const VIDEO_RESOLUTIONS = [
     "Auto", "1080p", "768p", "720p", "512p"
 ];
 
-// gpt2api 各模型时长分档（与后台 model_prices / 接口文档一致）
-// Grok：6 / 10 / 20 / 30（20/30 由后端自动拼接）
-// Sora：4 / 8 / 12；VEO 3.1 系列：4 / 6 / 8
-const GROK_VIDEO_DURATIONS = [6, 10, 20, 30];
-const GROK_VIDEO_RESOLUTIONS = ['480p', '720p', '1080p'];
-const GROK_VIDEO_RATIOS = ['16:9', '9:16', '1:1'];
+// Video durations in seconds
+const VIDEO_DURATIONS = [5, 6, 8, 10];
 
 // Video model versions with metadata
 // supportsTextToVideo: Can generate video from text prompt only
@@ -53,9 +49,9 @@ const GROK_VIDEO_RATIOS = ['16:9', '9:16', '1:1'];
 const VIDEO_ASPECT_RATIOS = ["16:9", "9:16"];
 
 const VIDEO_MODELS = [
-    // gpt2api.com 视频模型 — 时长按接口文档分档，切换模型时下拉只显示该模型支持的秒数
-    { id: 'grok-imagine-video', name: 'Grok Imagine Video', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: GROK_VIDEO_DURATIONS, resolutions: GROK_VIDEO_RESOLUTIONS, aspectRatios: GROK_VIDEO_RATIOS },
-    { id: 'xai/grok-imagine-video', name: 'Grok Imagine Video 1.5', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: GROK_VIDEO_DURATIONS, resolutions: GROK_VIDEO_RESOLUTIONS, aspectRatios: GROK_VIDEO_RATIOS },
+    // gpt2api.com 视频模型
+    { id: 'xai/grok-imagine-video', name: 'Grok Imagine Video · xAI', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [6, 10, 20, 30], resolutions: ['480p', '720p', '1080p'], aspectRatios: ['16:9', '9:16', '1:1'] },
+    { id: 'grok-imagine-video', name: 'Grok Imagine Video · 长视频', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [6, 10, 20, 30], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16', '1:1'] },
     { id: 'veo3.1-lite', name: 'VEO 3.1 Lite', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'veo3.1', name: 'VEO 3.1', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'veo3.1-flash', name: 'VEO 3.1 Flash', provider: 'gpt2api', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: false, durations: [4, 6, 8], resolutions: ['720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
@@ -452,16 +448,6 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             onUpdate(data.id, { videoModel: availableVideoModels[0].id });
         }
     }, [videoGenerationMode, data.videoModel, data.type, data.id, availableVideoModels, onUpdate]);
-
-    // 将节点上非法/旧版时长对齐到当前模型支持的分档（如 Grok 仅 6/10/20/30）
-    useEffect(() => {
-        if (data.type !== NodeType.VIDEO) return;
-        const supported = currentVideoModel.durations || [];
-        if (supported.length === 0) return;
-        if (data.videoDuration == null || !supported.includes(data.videoDuration)) {
-            onUpdate(data.id, { videoDuration: supported[0] });
-        }
-    }, [data.type, data.id, data.videoDuration, currentVideoModel.durations, onUpdate]);
 
     const handleVideoModelChange = (modelId: string) => {
         const newModel = VIDEO_MODELS.find(m => m.id === modelId);

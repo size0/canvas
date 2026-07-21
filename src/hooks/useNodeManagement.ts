@@ -38,7 +38,6 @@ export const useNodeManagement = () => {
         const canvasX = (x - viewport.x) / viewport.zoom;
         const canvasY = (y - viewport.y) / viewport.zoom;
 
-        const isVideo = type === NodeType.VIDEO;
         const newNode: NodeData = {
             id: crypto.randomUUID(),
             type,
@@ -48,11 +47,9 @@ export const useNodeManagement = () => {
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
             imageModel: 'nano-banana-pro',
-            videoModel: 'grok-imagine-video',
-            // Grok 统一下游时长分档：6 / 10 / 20 / 30 秒
-            videoDuration: isVideo ? 6 : undefined,
-            aspectRatio: isVideo ? '16:9' : 'Auto',
-            resolution: isVideo ? '720p' : 'Auto',
+            videoModel: 'xai/grok-imagine-video',
+            aspectRatio: 'Auto',
+            resolution: 'Auto',
             parentIds: parentId ? [parentId] : []
         };
 
@@ -123,11 +120,6 @@ export const useNodeManagement = () => {
                 const GAP = 100;
                 const NODE_WIDTH = 340;
 
-                const isVideo = type === NodeType.VIDEO;
-                const videoDefaults = isVideo
-                    ? { videoModel: 'grok-imagine-video', videoDuration: 6, aspectRatio: '16:9', resolution: '720p' }
-                    : { aspectRatio: 'Auto', resolution: 'Auto' };
-
                 let newNode: NodeData;
 
                 if (direction === 'right') {
@@ -140,7 +132,8 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        ...videoDefaults,
+                        aspectRatio: 'Auto',
+                        resolution: 'Auto',
                         parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
                     };
                 } else {
@@ -153,7 +146,8 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        ...videoDefaults,
+                        aspectRatio: 'Auto',
+                        resolution: 'Auto',
                         parentIds: []
                     };
                     // Update source to add new node as parent

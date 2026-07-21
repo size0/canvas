@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/432539/MagicalCanvas.git"
+    "url": "https://github.com/size0/canvas.git"
   },
   "type": "module",
   "main": "electron/main.cjs",
