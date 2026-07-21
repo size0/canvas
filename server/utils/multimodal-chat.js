@@ -86,6 +86,9 @@ export async function textChat({
     temperature = 0.5,
     retries = 3,
     onDelta,
+    model,
+    baseUrl,
+    label = '文字模型调用',
 }) {
     return runWithRetry({
         messages: [
@@ -95,7 +98,9 @@ export async function textChat({
         maxTokens,
         temperature,
         onDelta,
-    }, { retries, label: '文字模型调用' });
+        ...(model ? { model } : {}),
+        ...(baseUrl ? { baseUrl } : {}),
+    }, { retries, label });
 }
 
 export async function multimodalChat({

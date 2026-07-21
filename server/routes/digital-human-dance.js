@@ -6,7 +6,7 @@
 import express from 'express';
 import { jsonrepair } from 'jsonrepair';
 import { getKey } from '../config.js';
-import { multimodalChat } from '../utils/multimodal-chat.js';
+import { multimodalChat, textChat } from '../utils/multimodal-chat.js';
 
 const router = express.Router();
 const DEFAULT_DURATION = 20;
@@ -14,7 +14,8 @@ const ASPECT_RATIO = '9:16';
 const SUPPORTED_DURATIONS = [6, 10, 20, 30];
 const CHILD_AGE = /儿童|幼儿|青少年|child|teen/i;
 const CHILD_UNSAFE_STYLE = /露脐|抹胸|吊带|滑肩|低胸|性感|挑逗|撩人|扭胯|臀部|胸部|高跟|劈叉|地板动作/gi;
-const FORCED_RESTYLE_INSTRUCTION = '上传图只用于锁定数字角色本身，不得沿用上传图里的旧服装、旧发型、旧发饰、旧表情模板或旧背景。必须生成一套肉眼明显不同的新服装、新发型、新配饰、新表情风格和新场景；新方案仍需与人物年龄呈现、舞种和场景协调。';
+const FACE_REFERENCE_INSTRUCTION = '上传图只有两个用途：判断可见年龄阶段，以及作为后续生图的唯一脸部身份参考。严格保持同一张脸及其可识别的面部结构；不得从上传图提取、描述或延续身材、体型、姿态、气质、服装、发型、发饰、其他配饰、表情模板、构图或背景。';
+const FORCED_RESTYLE_INSTRUCTION = '除脸部身份和年龄呈现外，上传图中的其余内容全部视为无效旧方案。必须重新设计肉眼明显不同的完整服装、发型、配饰、表情风格、自然身体姿态和新场景；新方案只依据年龄阶段、舞种和创作主题，不得模仿原图。';
 
 function cleanString(value, fallback = '', max = 4000) {
     const text = typeof value === 'string' || typeof value === 'number'
@@ -76,7 +77,7 @@ function enforceSafetyMode(plan) {
         };
     }
 
-    plan.characterProfile.continuityNote = '输入素材被声明为不对应现实未成年人的原创虚构数字角色。后续延续该虚构角色可识别的面部设计、年龄呈现和身体比例，但必须重新设计服装、发型、配饰、表情风格与场景。';
+    plan.characterProfile.continuityNote = '后续生图只延续上传数字人的同一脸部设计与儿童年龄呈现；不延续原图的身材、体型、姿态、气质、服装、发型、配饰、表情、构图或背景。';
     plan.roleSetting.outfit = sanitizeChildText(
         plan.roleSetting.outfit,
         '完整得体、方便活动、符合儿童年龄的日常舞蹈服装与舒适运动鞋',
@@ -140,8 +141,8 @@ function normalizePlan(raw, duration) {
     const plan = {
         characterProfile: {
             ageGroup: cleanString(profile.ageGroup, '无法确认', 30),
-            visualSummary: cleanString(profile.visualSummary, '以用户上传的数字人图为唯一视觉参考', 800),
-            continuityNote: cleanString(profile.continuityNote, '保持人物的面部特征、年龄呈现、身材比例和整体气质连续稳定', 800),
+            visualSummary: '规划模型仅从上传图判断可见年龄阶段，不读取其他人物或造型信息。',
+            continuityNote: '后续生图以上传图作为唯一脸部身份参考，只保持同一张脸和年龄呈现；其余视觉元素全部重新设计。',
         },
         roleSetting: {
             theme: cleanString(role.theme, '真实生活场景中的短视频舞蹈', 150),
@@ -173,12 +174,13 @@ function buildPrompts(plan, duration) {
         ? '这是一个全新原创的虚构儿童数字角色。服装完整得体，舞蹈健康、童真、低冲击并符合年龄。'
         : '服装与编舞应符合人物明确的年龄呈现，不改变年龄感。';
     const continuity = isChild
-        ? `输入素材是用户声明有权使用、且不对应现实未成年人的原创虚构儿童数字角色。保持该虚构角色可识别的面部设计、年龄呈现、肤色和身体比例，不推断现实身份；上传图中的衣服、发型、发饰、表情和背景均为旧方案，必须全部重新设计。${character.continuityNote}`
-        : `以输入数字人作为唯一人物视觉参考，保持可识别的面部特征、年龄呈现、肤色、身材比例与整体气质连续稳定，不推断现实身份；上传图中的衣服、发型、配饰、表情和背景均为旧方案，必须全部重新设计。${character.continuityNote}`;
+        ? `输入素材是用户声明有权使用、且不对应现实未成年人的原创虚构儿童数字角色。只保持该虚构角色的同一张脸和儿童年龄呈现，不推断现实身份。${character.continuityNote}`
+        : `输入数字人只作为同一张脸和年龄呈现的视觉参考，不推断现实身份。${character.continuityNote}`;
 
     const roleImagePrompt = [
         `生成一张 ${ASPECT_RATIO} 竖版、照片级写实的“角色设定定稿图”，不是分镜拼图。`,
         continuity,
+        FACE_REFERENCE_INSTRUCTION,
         childSafe,
         FORCED_RESTYLE_INSTRUCTION,
         `主题：${role.theme}。`,
@@ -187,8 +189,8 @@ function buildPrompts(plan, duration) {
         `场景：${role.scene}。灯光：${role.lighting}。色彩：${role.colorPalette}。`,
         `摄影语言：${role.cameraLanguage}。人物完整入镜，脚部清楚，身体比例自然，不拉长腿部，不使用低机位仰拍或夸张广角透视。`,
         isChild
-            ? '这张图的职责是建立一个新的虚构儿童数字角色，并锁定其服装、发型、配饰、表情风格和场景空间供本次创作继续使用。只输出单张完整画面，不要多格排版、文字、Logo、水印、额外肢体或混乱背景。'
-            : '这张图的职责是一次性锁定后续视频使用的人物、服装、发型、配饰、表情风格和场景空间。禁止多格排版、文字、Logo、水印、换脸、年龄漂移、额外肢体、塑料皮肤和背景结构混乱。',
+            ? '用参考图中的同一张脸建立新的虚构儿童角色造型，再锁定本次新生成的服装、发型、配饰、表情风格和场景供后续首帧使用。只输出单张完整画面，不要多格排版、文字、Logo、水印、换脸、额外肢体或混乱背景。'
+            : '用参考图中的同一张脸建立全新造型，再一次性锁定后续视频使用的新服装、新发型、新配饰、新表情风格和新场景。禁止多格排版、文字、Logo、水印、换脸、年龄漂移、额外肢体、塑料皮肤和背景结构混乱。',
     ].join('\n');
 
     const first = storyboard.timeline[0];
@@ -249,20 +251,28 @@ router.post('/analyze', async (req, res) => {
     };
 
     try {
-        send({ type: 'status', stage: 1, message: '第 1/3 步：正在读取数字人并规划角色设定…' });
-        const reply = await multimodalChat({
-            system: `你是数字人短视频的角色造型师、场景导演和专业舞蹈编导。你只做艺术创作规划，不识别或猜测现实人物身份、姓名、民族、健康、性取向等敏感信息。输入是用户声明有权使用的虚构或自有数字人素材。
+        send({ type: 'status', stage: 1, message: '第 1/3 步：仅判断数字人的可见年龄阶段…' });
+        const ageReply = await multimodalChat({
+            system: `你是数字人素材的年龄阶段分类器。你只能观察并输出画面人物的可见年龄阶段，不得分析、描述、推断或利用脸部细节、身份、性别、民族、健康、气质、身材、体型、姿态、服装、发型、配饰、表情、构图、场景或背景。输入是用户声明有权使用的虚构或自有数字人素材。只输出严格 JSON，不要 Markdown 或解释。`,
+            prompt: `只判断画面人物的可见年龄阶段。输出 {"ageGroup":"约4岁儿童/约15岁青少年/约23岁成年/无法确认"}，年龄数字按画面合理估计，且只能包含 ageGroup 这一个字段。`,
+            imageUrls: [digitalHumanImageUrl],
+            libraryDir: req.app.locals.LIBRARY_DIR,
+            model: plannerModel,
+            label: '数字人年龄阶段判断',
+            maxTokens: 120,
+            temperature: 0,
+        });
+        const ageGroup = cleanString(parseStructuredJson(ageReply)?.ageGroup, '无法确认', 30);
 
-请根据画面中可见的年龄呈现、气质、构图和人物特征，自动设计最合适的完整服装、发型、配饰、表情风格、真实生活场景、舞种、节拍和一个微小生活事件。上传图中的服装、发型、发饰、表情模板和背景都是必须被替换的旧方案，禁止复述、近似复刻或只换颜色；新服装至少在轮廓、材质、色彩、单品组合中有三项明显不同，新发型必须有肉眼可见的轮廓或扎发方式变化。洗衣店只是示例，除非确实最合适，否则不要默认洗衣店。服装、舞种和事件必须彼此匹配。
+        send({ type: 'status', stage: 1, message: `已判断年龄阶段：${ageGroup}；正在独立设计全新造型与编舞…` });
+        const reply = await textChat({
+            system: `你是数字人短视频的角色造型师、场景导演和专业舞蹈编导。你不会看到上传图片，只会收到可见年龄阶段，因此不得描述或沿用原图的脸部、身份、性别、民族、健康、气质、身材、体型、姿态、服装、发型、配饰、表情、构图、场景或背景。
 
-若人物看起来像儿童或青少年，必须采用符合年龄的健康、童真、完整得体造型与安全低冲击舞蹈，并按原创虚构数字角色进行规划。只输出严格 JSON，不要 Markdown 或解释。`,
-            prompt: `为这个数字人规划一条 ${duration} 秒、${ASPECT_RATIO}、一镜到底的真实生活感舞蹈视频。输出：
+请仅依据给定年龄阶段，自主设计全新的完整服装、发型、配饰、表情风格、自然身体姿态、真实生活场景、舞种、节拍和一个微小生活事件。服装、舞种和事件必须彼此匹配；洗衣店只是示例，不得默认使用。若年龄阶段为儿童或青少年，必须采用健康、童真、完整得体的造型与安全低冲击舞蹈。只输出严格 JSON，不要 Markdown 或解释。`,
+            prompt: `可见年龄阶段：${ageGroup}。
+
+为该年龄阶段的数字人规划一条 ${duration} 秒、${ASPECT_RATIO}、一镜到底的真实生活感舞蹈视频。不要输出人物视觉分析，只输出：
 {
-  "characterProfile": {
-    "ageGroup": "只写儿童/青少年/成年/无法确认之一",
-    "visualSummary": "只描述创作所需的可见视觉特征，不做身份判断",
-    "continuityNote": "后续保持视觉连续性的简短规则"
-  },
   "roleSetting": {
     "theme": "主题",
     "outfit": "从上到下完整服装与材质颜色",
@@ -287,10 +297,8 @@ ${timelineSkeleton}
 }
 
 要求：${timelineRanges.length} 段合起来是同一支舞，不是动作清单；有清楚脚步、重心、方向、上肢线条、高潮和结尾；不用慢动作填时长；生活事件只能短暂影响注意力，不能打断舞蹈。`,
-            imageUrls: [digitalHumanImageUrl],
-            libraryDir: req.app.locals.LIBRARY_DIR,
             model: plannerModel,
-            label: '数字人多模态规划',
+            label: '数字人造型与编舞规划',
             maxTokens: 9000,
             temperature: 0.65,
             onDelta: (_delta, total) => {
@@ -299,7 +307,10 @@ ${timelineSkeleton}
         });
 
         send({ type: 'status', stage: 2, message: '第 2/3 步：正在锁定角色设定和精确首帧…' });
-        const plan = normalizePlan(parseStructuredJson(reply), duration);
+        const plan = normalizePlan({
+            ...parseStructuredJson(reply),
+            characterProfile: { ageGroup },
+        }, duration);
         const prompts = buildPrompts(plan, duration);
 
         send({ type: 'status', stage: 3, message: `第 3/3 步：正在生成 ${duration} 秒编舞故事板…` });

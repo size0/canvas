@@ -65,7 +65,7 @@ interface DigitalHumanDanceWorkflowModalProps {
 }
 
 const PIPELINE = [
-    { label: '角色设定', desc: '锁定脸、服装、发型、配饰', icon: ScanFace },
+    { label: '年龄与脸部', desc: '只判断年龄，保留同一张脸', icon: ScanFace },
     { label: '精确首帧', desc: '锁定场景、机位和起拍姿势', icon: ImageIcon },
     { label: '编舞故事板', desc: '节拍、运镜与生活瞬间', icon: Music2 },
     { label: 'Grok 成片', desc: '9:16、一镜到底', icon: Film },
@@ -246,7 +246,7 @@ export const DigitalHumanDanceWorkflowModal: React.FC<DigitalHumanDanceWorkflowM
                         </div>
                         <div>
                             <h2 className="text-sm font-semibold text-white">数字人一键编舞</h2>
-                            <p className="mt-0.5 text-[11px] text-neutral-500">只上传数字人，自动完成角色设定、精确首帧和 Grok 成片</p>
+                            <p className="mt-0.5 text-[11px] text-neutral-500">只上传数字人；仅判断年龄并保留同一张脸，其余造型全部重做</p>
                         </div>
                     </div>
                     <button onClick={onClose} disabled={loading} className="rounded-lg p-1.5 text-neutral-500 hover:bg-white/10 hover:text-white disabled:opacity-40">
@@ -321,7 +321,7 @@ export const DigitalHumanDanceWorkflowModal: React.FC<DigitalHumanDanceWorkflowM
                                 <div className="mt-2 truncate text-[10px] text-neutral-600" title={plannerApiUrl || '使用设置中的文字模型接口'}>
                                     接口：{plannerApiUrl || '使用「设置 → 文字模型」中的 Base URL'}
                                 </div>
-                                <div className="mt-1 text-[10px] text-neutral-600">这里只覆盖本次规划使用的模型名，网址和 KEY 继续读取全局设置；所选模型必须支持图片输入。</div>
+                                <div className="mt-1 text-[10px] text-neutral-600">模型看图时只判断年龄阶段；造型规划只接收年龄，不读取原图其余信息。网址和 KEY 继续读取全局设置。</div>
                             </div>
                             <div className="rounded-xl border border-white/[0.07] bg-black/25 p-4">
                                 <div className="flex items-center justify-between text-xs font-medium text-white">
@@ -357,7 +357,7 @@ export const DigitalHumanDanceWorkflowModal: React.FC<DigitalHumanDanceWorkflowM
                                     <span className="rounded-md bg-black/25 px-2 py-1">一镜到底</span>
                                     <span className="rounded-md bg-black/25 px-2 py-1">Grok</span>
                                 </div>
-                                <p className="mt-3 text-[10px] leading-5 text-neutral-500">洗衣店只是范例。系统会依据数字人的年龄呈现、气质和适合的舞种重新选择场景，不会固定套用洗衣店。</p>
+                                <p className="mt-3 text-[10px] leading-5 text-neutral-500">上传图只用于判断年龄和后续锁定同一张脸。服装、发型、配饰、表情、身体姿态与场景都由系统重新设计。</p>
                             </div>
                             <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2.5 text-[10px] leading-5 text-amber-100/70">
                                 请只上传你有权使用的自有或虚构数字人素材。检测到儿童形象时，会自动改为“不对应真人的原创虚构角色”模式，并清理不符合年龄的造型与动作描述。
