@@ -31,9 +31,9 @@ const ADULT_DANCE_DIRECTIONS = [
     'Latin Pop 融合：脚下节奏变化、身体转向与流畅手臂路径，保持商业审美不过度挑逗',
     'Urban Contemporary：呼吸驱动、重心下沉与回弹、连续躯干路径和空间位移',
 ];
-const FACE_REFERENCE_INSTRUCTION = 'Use the uploaded image as the exact facial identity reference. Preserve the same recognizable face, facial structure, skin tone, eye shape, nose, lips, visible age and natural facial details. Do not beautify, reshape, mature, infantilize or replace the face. The upload is not a reference for clothes, hairstyle, accessories, pose, composition or background.';
+const FACE_REFERENCE_INSTRUCTION = 'IDENTITY LOCK — Reference image 1 is the canonical and highest-priority facial identity source. Preserve the exact same recognizable face: face length and width, forehead, hairline, eye spacing, eye shape, eyelids, eyebrows, nose bridge, nose tip, nostrils, cheek volume, mouth width, lip shape, visible teeth spacing, jawline, chin, ears, skin tone and visible age. Do not average this face with a generic East Asian child or adult face. Do not beautify, enlarge the eyes, narrow the jaw, shrink the nose, change facial proportions, mature, infantilize or replace the person. A natural expression may change, but the underlying face geometry and identity must remain unmistakably the same. If any styling or composition instruction conflicts with identity, preserve the face and simplify the styling. The upload is not a reference for clothing, hairstyle, accessories, pose, composition or background.';
 const FORCED_RESTYLE_INSTRUCTION = '除脸部身份和年龄呈现外，上传图中的其余内容全部视为旧方案。重新设计现实中可以买到、日常真的会穿、适合舞动的完整造型；变化要来自合理的服装搭配、发型、配饰、表情和场景，而不是夸张造型、卡通符号或模板化儿童元素。';
-const CANDID_REALISM_INSTRUCTION = '真实感优先：这是普通人用手机后置主摄记录舞者的生活照片，不是影棚写真、童装目录、AI 样片或商业精修。保留自然皮肤纹理、细小毛孔、真实发丝、衣料褶皱、鞋底与地面接触、轻微曝光差异和少量生活环境痕迹。构图允许轻微偏心和自然留白，人物不做双手捧起、张开双臂展示、标准站军姿或刻意卖萌等摆拍动作。禁止塑料皮肤、陶瓷肌、HDR 过度锐化、奶油滤镜、全景均匀暖黄光、虚假的柔焦光晕、完美对称构图、空无一物的样板间、幼儿园围裙套装、卡通徽章堆叠、为可爱而添加的发箍和糖果色鞋。';
+const CANDID_REALISM_INSTRUCTION = 'IMAGE QUALITY — 9:16 vertical, high-resolution photorealistic candid lifestyle photo, captured with a modern smartphone rear main camera at a natural shooting distance. RAW-like original-camera texture, realistic local sharpening, natural dynamic range, slight sensor grain and small exposure imperfections; no commercial retouching. Preserve age-appropriate natural skin texture, subtle pores and peach fuzz, true skin color variation, realistic individual hair strands and flyaways, fabric weave, seams, wrinkles, garment weight, shoe texture, sole pressure and correct foot contact with the ground. Use one identifiable real light source with natural falloff, believable highlights and transparent shadows; the environment must have depth and restrained everyday traces. Composition may be slightly off-center with natural breathing room. The subject must not perform a catalog display pose, symmetrical presentation gesture, hands-open product pose, rigid military stance or deliberate cute pose. NEGATIVE — generic AI face, face drift, altered facial proportions, oversized anime eyes, narrowed jaw, tiny nose, plastic skin, porcelain skin, wax figure, excessive skin smoothing, fake bokeh, HDR over-sharpening, creamy filter, uniform warm-yellow lighting, studio softbox light, beauty campaign retouching, perfect symmetry, pristine showroom, institutional school or hospital corridor, kindergarten apron outfit, stacked cartoon badges, decorative headband added only for cuteness, candy-colored template styling, deformed hands, extra fingers, floating feet, elongated legs, text, logo, watermark.';
 
 function cleanString(value, fallback = '', max = 4000) {
     const text = typeof value === 'string' || typeof value === 'number'
@@ -214,17 +214,16 @@ function buildPrompts(plan, duration) {
 
     const roleImagePrompt = [
         `生成一张 ${ASPECT_RATIO} 竖版、真实手机抓拍质感的“舞蹈造型定稿照”，不是分镜拼图。`,
-        continuity,
+        `【最高优先级：身份锁定】${continuity}`,
         FACE_REFERENCE_INSTRUCTION,
-        childSafe,
-        FORCED_RESTYLE_INSTRUCTION,
+        `【年龄与安全】${childSafe}`,
+        `【全新造型边界】${FORCED_RESTYLE_INSTRUCTION}`,
+        `【主题与完整服装】主题：${role.theme}。从上到下完整服装：${role.outfit}。`,
+        `【大众审美搭配】${role.stylingLogic}。`,
+        `【发型、配饰与表情】发型可以按规划改变，但不得改变发际线、耳位和面部结构：${role.hairstyle}。配饰：${role.accessories}。表情风格：${role.expressionStyle}。`,
+        `【真实场景、灯光与色彩】场景：${role.scene}。灯光：${role.lighting}。色彩：${role.colorPalette}。`,
+        `【镜头与构图】${role.cameraLanguage}。使用手机后置主摄的自然透视，摄影者与人物保持足够距离，机位在成人胸口至视线高度并轻微俯拍约 5–8 度；人物完整入镜，脚部清楚，身体比例自然，人物占画面约 55%–65%，脸部在最终 9:16 画面中仍清晰可辨，保留真实环境，不拉长腿部，不使用低机位仰拍、超广角或夸张景深。`,
         CANDID_REALISM_INSTRUCTION,
-        `主题：${role.theme}。`,
-        `完整服装：${role.outfit}。`,
-        `大众审美与搭配逻辑：${role.stylingLogic}。`,
-        `发型：${role.hairstyle}。配饰：${role.accessories}。表情风格：${role.expressionStyle}。`,
-        `场景：${role.scene}。灯光：${role.lighting}。色彩：${role.colorPalette}。`,
-        `摄影语言：${role.cameraLanguage}。使用手机后置主摄的自然透视，摄影者与人物保持足够距离，机位在成人胸口至视线高度并轻微俯拍约 5–8 度；人物完整入镜，脚部清楚，身体比例自然，人物占画面约 55%–65%，保留真实环境，不拉长腿部，不使用低机位仰拍、超广角或夸张景深。`,
         isChild
             ? '用参考图中的同一张脸建立新的虚构儿童角色造型，再锁定本次新生成的服装、发型、配饰、表情风格和场景供后续首帧使用。儿童造型必须像真实家庭日常穿搭，不使用幼儿园围裙、演出服、卡通徽章堆叠或刻意卖萌造型。只输出单张完整画面，不要多格排版、文字、Logo、水印、换脸、额外肢体或混乱背景。'
             : '用参考图中的同一张脸建立全新造型，再一次性锁定后续视频使用的新服装、新发型、新配饰、新表情风格和新场景。禁止多格排版、文字、Logo、水印、换脸、年龄漂移、额外肢体、塑料皮肤和背景结构混乱。',
@@ -232,10 +231,12 @@ function buildPrompts(plan, duration) {
 
     const first = storyboard.timeline[0];
     const firstFramePrompt = [
-        `将输入的角色设定定稿图转换为一张 ${ASPECT_RATIO} 竖版“精确视频首帧”，只输出单张画面。`,
+        `根据输入的原始身份图和角色造型定稿图，生成一张 ${ASPECT_RATIO} 竖版“精确视频首帧”，只输出单张画面。`,
+        'REFERENCE ORDER — Reference image 1 is the original canonical face identity and has absolute priority for the face. Reference image 2 is the approved styling image and is used only for clothing, hairstyle, accessories, body styling, scene, lighting and color. Never copy the face from reference image 2 when it differs from reference image 1.',
+        FACE_REFERENCE_INSTRUCTION,
         isChild
-            ? '输入图是本流程刚刚生成的原创虚构儿童数字角色设定图。延续这名虚构角色的整体造型、年龄呈现、身材比例、服装、发型、配饰、表情基调、场景结构、灯光和色彩。'
-            : '角色设定图中的人物面部、年龄呈现、身材比例、服装、发型、配饰、表情基调、场景结构、灯光和色彩全部锁定，不重新设计。',
+            ? '参考图2是本流程刚刚生成的原创虚构儿童角色造型图。仅从参考图2延续身材比例、服装、发型、配饰、表情基调、场景结构、灯光和色彩；脸部身份和年龄呈现始终以参考图1为准。'
+            : '仅从参考图2锁定身材比例、服装、发型、配饰、表情基调、场景结构、灯光和色彩，不重新设计；脸部身份和年龄呈现始终以参考图1为准。',
         childSafe,
         CANDID_REALISM_INSTRUCTION,
         `舞种：${role.danceStyle}，约 ${role.tempoBpm} BPM。核心律动：${storyboard.coreGroove}。动作母题：${storyboard.movementMotif}。首帧处于动作真正开始前的稳定起拍状态：${first.action}。`,
@@ -312,12 +313,12 @@ router.post('/analyze', async (req, res) => {
 
 专业设计框架：
 1. 年龄分支：儿童或青少年采用符合年龄、健康得体的造型和低冲击编舞，但低冲击不等于缓慢、呆板或动作稀少，仍需有清楚律动、连续脚步、方向变化和高潮；成年人不套用儿童动作限制，可采用更丰富的力量、幅度、躯干律动与空间移动，但不过度挑逗或低俗。
-2. 大众审美搭配：整套服饰必须是现实品牌和商场中常见、真实可买到的日常穿搭，耐看、比例协调并适合舞动。主色通常不超过三种，只设一个视觉重点，其余单品负责平衡；上衣、下装或连衣单品、外搭、袜鞋、发型、少量配饰必须有清楚的风格与季节逻辑。儿童也不能默认生成幼儿园围裙、背带围裙、演出服、卡通徽章堆叠、糖果色全套或刻意卖萌发箍；成年人不能默认网红露肤套装。避免高饱和撞色、舞台戏服感、随机配饰、多个视觉重点、上下装比例失衡或鞋服风格冲突。
+2. 大众审美搭配：整套服饰必须是现实品牌和商场中常见、真实可买到的日常穿搭，耐看、比例协调并适合舞动，同时具有自然的小网红穿搭辨识度，而不是普通校服、幼儿园服或批量儿童模板。主色通常不超过三种，只设一个视觉重点，其余单品负责平衡；上衣、下装或连衣单品、外搭、袜鞋、发型、少量配饰必须有清楚的风格与季节逻辑。儿童也不能默认生成幼儿园围裙、背带围裙、演出服、卡通徽章堆叠、糖果色全套或刻意卖萌发箍；成年人不能默认网红露肤套装。避免高饱和撞色、舞台戏服感、随机配饰、多个视觉重点、上下装比例失衡或鞋服风格冲突。
 3. 舞种与律动：先确定一个贯穿全程的核心 groove，再确定一至两个可识别的动作母题；后续通过方向、幅度、层级和速度变奏发展，而不是不断换新动作。
 4. 连续编舞：每段必须继承上一段结尾的落脚、重心、朝向、手臂轨迹和运动惯性。用顺势迈步、重心反弹、身体扭转、手臂延长或收回完成过渡，不允许回到中立站姿再开始下一动作。
 5. 自然动作质量：动作要有启动、经过和收势，上下肢协调，重心真实落在支撑脚上。禁止“摆姿势—停顿—换姿势”、连续几个硬手势、机械左右复制、频繁定格、突然甩头、无准备旋转、只有手动脚不动，或把两秒动作拖满整段。
 6. 节奏结构：整支舞必须有起拍、建立律动、发展、方向或空间变化、高潮和收尾；时间段只是时间标记，不是独立动作卡。动作密度与 BPM 匹配，转场发生在动作内部。
-7. 真实影像：造型定稿照与首帧都必须像普通手机后置主摄拍到的真实生活画面，而不是 AI 儿童样片、影棚写真或童装目录。场景应是有真实使用痕迹、光源方向和空间层次的地点，不使用过度干净的奶油色样板间、全景均匀暖黄光、虚假柔焦、完美对称构图或与服装同色系的刻意布景。保留自然皮肤与发丝、真实衣料褶皱、鞋底受力、局部曝光差异和适量环境细节。
+7. 真实影像：造型定稿照与首帧都必须像审美良好的家人或朋友用手机后置主摄拍到的真实生活画面，而不是 AI 儿童样片、影棚写真或童装目录。场景应干净、有审美、有真实使用痕迹、明确光源方向和空间层次，优先选择有自然侧光、材质层次和安全舞动空间的真实地点；不使用旧学校走廊、医院或机构走廊、过度干净的奶油色样板间、全景均匀暖黄光、虚假柔焦、完美对称构图或与服装同色系的刻意布景。保留自然皮肤与发丝、真实衣料褶皱、鞋底受力、局部曝光差异和适量环境细节。
 8. 镜头与场景：舞者运动带动镜头，摄影只做必要的后退、横移和小幅绕行；全程保留脚部。场景只提供舞动空间与氛围，不得设计生活事件、背景人物插曲、道具突发变化、额外互动或注意力转移。
 
 舞风多样性规则：严格围绕本次给定的舞风方向创作，不得无视方向并默认输出“K-pop 弹步舞”“step-touch 加手势”或通用短视频流行舞。除非本次方向明确要求，否则不要使用 K-pop 标签。核心脚步、身体动力和动作母题必须体现该舞种本身的节奏特征。

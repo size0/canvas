@@ -148,7 +148,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // Add character reference URLs from storyboard nodes (for maintaining character consistency)
                 if (node.characterReferenceUrls && node.characterReferenceUrls.length > 0) {
                     for (const charUrl of node.characterReferenceUrls) {
-                        if (imageBase64s.length < 14) { // Respect Gemini's limit
+                        if (imageBase64s.length < 14 && !imageBase64s.includes(charUrl)) { // Respect model limits without duplicating identity inputs
                             imageBase64s.push(charUrl);
                         }
                     }

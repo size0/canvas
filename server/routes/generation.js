@@ -58,7 +58,7 @@ router.post('/generate-image', async (req, res) => {
                 imageBase64Array = rawImages.map(img => resolveImageToBase64(img)).filter(Boolean);
             }
 
-            console.log(`Using image model: ${IMAGE_MODEL} @ ${IMAGE_API_URL}`);
+            console.log(`Using image model: ${IMAGE_MODEL} @ ${IMAGE_API_URL}; node=${nodeId || 'unknown'}; references=${imageBase64Array?.length || 0}; ratio=${aspectRatio || 'Auto'}; quality=${resolution || 'Auto'}`);
             const result = await generateGpt2apiImage({
                 prompt,
                 imageBase64Array,

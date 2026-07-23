@@ -1489,8 +1489,11 @@ export default function App() {
       y: mainY,
       prompt: '数字人参考图只用于严格保持同一张脸和年龄呈现；严格执行连接的造型规划，重新生成现实中可买到、日常真会穿的服装、协调发型和少量配饰。输出一张普通手机后置主摄拍摄的真实生活抓拍式全身造型照，不是童装目录、影棚写真、AI 样片或儿童模板图。保留真实皮肤、发丝、衣料褶皱、鞋底受力、局部曝光差异和生活环境痕迹；禁止围裙套装、卡通徽章堆叠、糖果色模板搭配、奶油暖黄样板间、塑料皮肤、完美对称构图及双手展示式摆拍。',
       parentIds: [anchorNode.id, rolePlanNode.id],
-      klingReferenceMode: 'subject',
-      klingSubjectIntensity: 90,
+      characterReferenceUrls: [opts.digitalHumanImage],
+      resolution: '4K',
+      klingReferenceMode: 'face',
+      klingFaceIntensity: 100,
+      klingSubjectIntensity: 100,
       adRole: 'dance-role-image',
     };
 
@@ -1502,9 +1505,12 @@ export default function App() {
       x: baseX + stepX * 2,
       y: mainY,
       prompt: result.firstFramePrompt,
-      parentIds: [roleImageNode.id],
-      klingReferenceMode: 'subject',
-      klingSubjectIntensity: 92,
+      parentIds: [anchorNode.id, roleImageNode.id],
+      characterReferenceUrls: [opts.digitalHumanImage],
+      resolution: '4K',
+      klingReferenceMode: 'face',
+      klingFaceIntensity: 100,
+      klingSubjectIntensity: 100,
       adRole: 'dance-first-frame',
     };
 
