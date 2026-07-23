@@ -18,19 +18,28 @@ export const GPT2API_VIDEO_MODELS = [
     'grok-imagine-video',
     'xai/grok-imagine-video',
     'sora',
+    'sora2',
+    'sora2-pro',
     'veo3.1',
     'veo3.1-flash',
     'veo3.1-lite',
+    'veo3.1-fast',
+    'veo3.1-ref',
 ];
 
 export const GPT2API_VIDEO_DURATIONS_BY_MODEL = {
     'grok-imagine-video': [6, 10, 20, 30],
-    // GPT2API exposes the same documented duration tiers for both Grok aliases.
-    'xai/grok-imagine-video': [6, 10, 20, 30],
+    // The official xAI route documents a minimum-cost 3s mode; the gateway
+    // also exposes the public 6/10/20/30s tiers for this model ID.
+    'xai/grok-imagine-video': [3, 6, 10, 20, 30],
     sora: [4, 8, 12],
+    sora2: [4, 8, 12],
+    'sora2-pro': [4, 8, 12],
     'veo3.1': [4, 6, 8],
     'veo3.1-flash': [4, 6, 8],
     'veo3.1-lite': [4, 6, 8],
+    'veo3.1-fast': [4, 6, 8],
+    'veo3.1-ref': [4, 6, 8],
 };
 
 export const isGpt2apiImageModel = (id) => GPT2API_IMAGE_MODELS.includes(id);
@@ -331,15 +340,16 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
             body.resolution = '480p';
         }
         if (refs.length === 1) body.image = refs[0];
-        else if (refs.length > 1 && resolvedModel === 'grok-imagine-video') body.images = refs;
+        else if (refs.length > 1 && ['grok-imagine-video', 'veo3.1-ref'].includes(resolvedModel)) body.images = refs;
         else if (refs.length > 1) body.image = refs[0];
     }
 
     const idempotencyKey = `vid-${randomUUID()}`;
-    const { res, data } = await postGenerationWithAlias({
+    const usesOfficialXaiRoute = resolvedModel === 'xai/grok-imagine-video';
+    const { res, data, path: requestPath } = await postGenerationWithAlias({
         base,
-        primaryPath: '/video/generations',
-        aliasPath: '/videos/generations',
+        primaryPath: usesOfficialXaiRoute ? '/videos/generations' : '/video/generations',
+        aliasPath: usesOfficialXaiRoute ? '/video/generations' : '/videos/generations',
         body,
         apiKey,
         idempotencyKey,
@@ -347,7 +357,7 @@ export async function generateGpt2apiVideo({ prompt, imageBase64, lastFrameBase6
     if (!res.ok) throw new Error(apiError(data, `视频请求失败 (HTTP ${res.status})`));
 
     let item = extractResultItem(data);
-    const task = extractTaskInfo(data, base, '/video/generations');
+    const task = extractTaskInfo(data, base, requestPath);
     if (!item) {
         if (!task.statusUrl) throw new Error('视频接口未返回结果或 task_id');
         item = await pollTask(task.statusUrl, apiKey, { timeoutMs: 900000 });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    GPT2API_VIDEO_MODELS,
     generateGpt2apiImage,
     generateGpt2apiVideo,
     normalizeGpt2apiVideoDuration,
@@ -25,11 +26,14 @@ function mediaResponse(fill = 1) {
 test('resolves stale models and normalizes documented duration tiers', () => {
     assert.equal(resolveGpt2apiVideoModel(null, 'grok-imagine-video-1.5-fast'), 'xai/grok-imagine-video');
     assert.equal(resolveGpt2apiVideoModel('grok-imagine-video', 'xai/grok-imagine-video'), 'grok-imagine-video');
-    assert.equal(normalizeGpt2apiVideoDuration(3, 'xai/grok-imagine-video'), 6);
+    assert.equal(normalizeGpt2apiVideoDuration(3, 'xai/grok-imagine-video'), 3);
     assert.equal(normalizeGpt2apiVideoDuration(15, 'xai/grok-imagine-video'), 10);
     assert.equal(normalizeGpt2apiVideoDuration(30, 'grok-imagine-video'), 30);
     assert.equal(normalizeGpt2apiVideoDuration(15, 'grok-imagine-video'), 10);
     assert.equal(normalizeGpt2apiVideoDuration(7, 'veo3.1'), 6);
+    assert.ok(GPT2API_VIDEO_MODELS.includes('sora2-pro'));
+    assert.ok(GPT2API_VIDEO_MODELS.includes('veo3.1-fast'));
+    assert.ok(GPT2API_VIDEO_MODELS.includes('veo3.1-ref'));
 });
 
 test('uses the official async image edit contract and polling path', async () => {
@@ -115,7 +119,7 @@ test('uses Sub2API native fields for multi-image edits', async () => {
     }
 });
 
-test('uses official xAI field names and response-provided status_url', async () => {
+test('uses the official xAI plural route, field names and polling path', async () => {
     const calls = [];
     const originalFetch = global.fetch;
     global.fetch = async (url, options = {}) => {
@@ -125,15 +129,7 @@ test('uses official xAI field names and response-provided status_url', async () 
             headers: options.headers || {},
             body: options.body ? JSON.parse(options.body) : null,
         });
-        if (calls.length === 1) {
-            return jsonResponse({
-                data: {
-                    id: 'xai-1',
-                    status: 'queued',
-                    status_url: '/v1/video/generations/xai-1',
-                },
-            }, 201);
-        }
+        if (calls.length === 1) return jsonResponse({ task_id: 'xai-1', status: 'queued' }, 201);
         if (calls.length === 2) {
             return jsonResponse({
                 data: {
@@ -151,22 +147,69 @@ test('uses official xAI field names and response-provided status_url', async () 
             imageBase64: 'https://img.example/start.jpg',
             aspectRatio: '9:16',
             resolution: '480p',
-            duration: 20,
+            duration: 3,
             model: 'xai/grok-imagine-video',
             baseUrl: 'https://www.gpt2api.com/v1',
             apiKey: 'test-key',
         });
 
-        assert.equal(calls[0].url, 'https://www.gpt2api.com/v1/video/generations');
+        assert.equal(calls[0].url, 'https://www.gpt2api.com/v1/videos/generations');
         assert.equal(calls[0].body.aspect_ratio, '9:16');
         assert.equal(calls[0].body.resolution, '480p');
-        assert.equal(calls[0].body.duration, 20);
+        assert.equal(calls[0].body.duration, 3);
         assert.deepEqual(calls[0].body.image, { url: 'https://img.example/start.jpg' });
         assert.equal(calls[0].body.ratio, undefined);
         assert.equal(calls[0].body.quality, undefined);
         assert.ok(calls[0].headers['Idempotency-Key']);
-        assert.equal(calls[1].url, 'https://www.gpt2api.com/v1/video/generations/xai-1');
+        assert.equal(calls[1].url, 'https://www.gpt2api.com/v1/videos/generations/xai-1');
         assert.equal(result.length, 64);
+    } finally {
+        global.fetch = originalFetch;
+    }
+});
+
+test('passes multiple references to the documented VEO reference model', async () => {
+    const calls = [];
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        calls.push({
+            url: String(url),
+            method: options.method || 'GET',
+            body: options.body ? JSON.parse(options.body) : null,
+        });
+        if (calls.length === 1) {
+            return jsonResponse({
+                status: 'succeeded',
+                result: { data: [{ url: 'https://cdn.example/veo-ref.mp4' }] },
+            });
+        }
+        return mediaResponse(6);
+    };
+
+    try {
+        await generateGpt2apiVideo({
+            prompt: 'preserve the character from both references',
+            referenceImages: [
+                'https://img.example/face.jpg',
+                'https://img.example/style.jpg',
+            ],
+            aspectRatio: '9:16',
+            resolution: '1080p',
+            duration: 6,
+            model: 'veo3.1-ref',
+            baseUrl: 'https://www.gpt2api.com/v1',
+            apiKey: 'test-key',
+        });
+
+        assert.equal(calls[0].url, 'https://www.gpt2api.com/v1/video/generations');
+        assert.equal(calls[0].body.model, 'veo3.1-ref');
+        assert.equal(calls[0].body.duration, 6);
+        assert.equal(calls[0].body.ratio, '9:16');
+        assert.equal(calls[0].body.quality, 'fullhd');
+        assert.deepEqual(calls[0].body.images, [
+            'https://img.example/face.jpg',
+            'https://img.example/style.jpg',
+        ]);
     } finally {
         global.fetch = originalFetch;
     }
@@ -250,7 +293,7 @@ test('reuses one idempotency key when falling back to the plural video alias', a
         assert.equal(calls[0].url, 'https://gateway.example/v1/video/generations');
         assert.equal(calls[1].url, 'https://gateway.example/v1/videos/generations');
         assert.equal(calls[0].headers['Idempotency-Key'], calls[1].headers['Idempotency-Key']);
-        assert.equal(calls[2].url, 'https://gateway.example/v1/video/generations/alias-1');
+        assert.equal(calls[2].url, 'https://gateway.example/v1/videos/generations/alias-1');
     } finally {
         global.fetch = originalFetch;
     }
