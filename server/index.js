@@ -121,6 +121,7 @@ applyConfigToEnv();
 // Return browser-safe settings and secret presence only.
 app.get('/api/settings', (req, res) => {
     try {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.json({
             success: true,
             settings: getPublicSettings(),
@@ -135,6 +136,7 @@ app.get('/api/settings', (req, res) => {
 // Persist non-secret settings. API keys are environment-managed and ignored.
 app.post('/api/settings', (req, res) => {
     try {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         const updates = (req.body && req.body.settings) ? req.body.settings : req.body;
         saveConfig(updates || {});
         applyConfigToEnv();

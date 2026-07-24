@@ -90,8 +90,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setError(null);
         setSavedTip(false);
         setLoading(true);
-        fetch('/api/settings')
-            .then(res => res.json())
+        fetch('/api/settings', { cache: 'no-store' })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '读取设置失败');
+                return data;
+            })
             .then(data => {
                 if (data && data.settings) setValues(data.settings);
                 setSecretStatus(data?.secretStatus || {});
@@ -115,12 +119,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             const res = await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                cache: 'no-store',
                 body: JSON.stringify({ settings: publicSettings }),
             });
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
                 throw new Error(data.error || '保存失败');
             }
+            if (data.settings) setValues(data.settings);
+            setSecretStatus(data.secretStatus || {});
             setSavedTip(true);
             setTimeout(() => setSavedTip(false), 2500);
         } catch (err: any) {
