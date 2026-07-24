@@ -47,17 +47,21 @@ function normalizeDuration(value) {
     return SUPPORTED_DURATIONS.includes(duration) ? duration : DEFAULT_DURATION;
 }
 
-function chooseDanceDirection(ageGroup) {
-    const pool = CHILD_AGE.test(ageGroup) ? CHILD_DANCE_DIRECTIONS : ADULT_DANCE_DIRECTIONS;
-    return pool[Math.floor(Math.random() * pool.length)];
+function danceDirectionOptions(ageGroup) {
+    return CHILD_AGE.test(ageGroup) ? CHILD_DANCE_DIRECTIONS : ADULT_DANCE_DIRECTIONS;
 }
 
 function timelineRangesFor(duration) {
-    const segmentCount = duration <= 6 ? 3 : duration <= 10 ? 5 : 6;
+    const segmentCount = duration <= 6 ? 2 : duration <= 10 ? 3 : duration <= 20 ? 4 : 5;
     const boundaries = Array.from({ length: segmentCount + 1 }, (_, index) =>
         Math.round((duration * index) / segmentCount)
     );
     return Array.from({ length: segmentCount }, (_, index) => [boundaries[index], boundaries[index + 1]]);
+}
+
+function distributedFallback(items, index, count) {
+    if (count <= 1) return items[0];
+    return items[Math.round((index * (items.length - 1)) / (count - 1))];
 }
 
 function parseStructuredJson(reply) {
@@ -157,16 +161,19 @@ function normalizePlan(raw, duration, danceDirection) {
         '借上一段动作回弹提高能量进入高潮，不突然停住后再起跳或旋转',
         '从高潮落脚直接收束幅度与呼吸，完成稳定但不僵硬的结尾',
     ];
-    const timeline = timelineRangesFor(duration).map(([startSec, endSec], index) => {
+    const timelineRanges = timelineRangesFor(duration);
+    const timeline = timelineRanges.map(([startSec, endSec], index) => {
         const item = rawTimeline[index] && typeof rawTimeline[index] === 'object'
             ? rawTimeline[index]
             : {};
+        const count = timelineRanges.length;
         return {
             startSec,
             endSec,
-            action: cleanString(item.action, fallbackActions[index], 1000),
-            connection: cleanString(item.connection, fallbackConnections[index], 700),
-            camera: cleanString(item.camera, fallbackCameras[index], 700),
+            counts: cleanString(item.counts, `第 ${index + 1} 个连续舞句`, 120),
+            action: cleanString(item.action, distributedFallback(fallbackActions, index, count), 1000),
+            connection: cleanString(item.connection, distributedFallback(fallbackConnections, index, count), 700),
+            camera: cleanString(item.camera, distributedFallback(fallbackCameras, index, count), 700),
             environment: cleanString(item.environment, '场景结构和灯光保持连续，不新增人物或环境事件', 500),
         };
     });
@@ -248,23 +255,21 @@ function buildPrompts(plan, duration) {
     ].join('\n');
 
     const timelineText = storyboard.timeline.map(item =>
-        `${item.startSec}-${item.endSec}秒：${item.action}。衔接：${item.connection}。摄影：${item.camera}。环境：${item.environment}。`
+        `${item.startSec}-${item.endSec}秒（${item.counts}）：${item.action}。衔接：${item.connection}。`
     ).join('\n');
     const videoPrompt = [
         isChild
             ? '输入图片是视频的精确第一帧，画面中的人物是本流程生成的原创虚构儿童数字角色。全程延续该虚构角色的整体造型、年龄呈现、身材比例、发型、服装、配饰、场景、灯光与色彩。'
             : '输入图片是视频的精确第一帧，也是舞者视觉身份、面部、年龄呈现、身材比例、发型、服装、配饰、场景、灯光与色彩的严格参考。全程保持视觉连续性，不重新设计人物或空间。',
         childSafe,
-        `生成一条 ${duration} 秒、${ASPECT_RATIO} 竖屏、正常实时速度、照片级真实手机摄影质感的连续舞蹈视频。舞种为“${role.danceStyle}”，节拍约 ${role.tempoBpm} BPM，主题为“${role.theme}”。`,
-        `舞蹈发生在：${role.scene}。全程专注完成同一支连续舞蹈；场景只提供空间和氛围，不安排生活事件、路人经过、道具突发变化、额外互动或注意力转移。`,
-        `核心律动：${storyboard.coreGroove}。动作母题：${storyboard.movementMotif}。这个律动和动作母题贯穿全片并逐步变奏，保证整支舞有统一风格而不是动作拼盘。`,
-        `节奏结构：${storyboard.rhythmArc}。舞名：${storyboard.danceName}。`,
+        `生成 ${duration} 秒、${ASPECT_RATIO} 竖屏、正常实时速度的一镜到底舞蹈。舞种：${role.danceStyle}；约 ${role.tempoBpm} BPM；舞名：${storyboard.danceName}。`,
+        `场景：${role.scene}。核心 groove：${storyboard.coreGroove}。动作母题：${storyboard.movementMotif}。节奏弧线：${storyboard.rhythmArc}。`,
         timelineText,
-        `镜头总则：${role.cameraLanguage}。保持一镜到底，不随机切镜；人物动作带动镜头，摄影者只做轻微手持跟随、后退、横移或必要的小幅绕行；全程保留完整脚部，禁止固定机位导致人物只在原地机械扭动。`,
-        '编舞连续性总则：上面的时间段只是同一支舞的时间标记，不是独立动作卡。每一段必须继承上一段结尾的落脚、重心、朝向、手臂轨迹和运动惯性；通过顺势迈步、重心反弹、身体扭转、手臂延长或收回自然过渡，禁止回到中立站姿后重新摆动作。动作由核心律动持续驱动，上下肢协调，包含启动、经过和收势，不出现“摆姿势—停顿—换姿势”、连续硬切手势、机械左右复制或只有手动脚不动。动作必须踩正常音乐节拍，有清楚脚步、重心、方向、层次、高潮和收尾；不用慢动作拖时长，不机械循环；头发、衣摆和配饰符合真实重力与惯性。',
+        '这些时间段是同一支舞的连续舞句，不是独立动作卡。基础 groove 从第一拍持续到最后一拍；每句继承上一句的落脚、支撑脚、重心、朝向、手臂轨迹和惯性，不能站回中立位再重新摆动作。上下肢同时参与，动作有启动、经过与收势；禁止连续硬手势、机械左右复制、频繁定格、只有手动脚不动，或用慢动作拖时长。',
+        `摄影：${role.cameraLanguage}。舞者带动镜头，摄影者只做必要的轻微跟随、后退或横移；全程保留完整脚部，不切镜、不炫技运镜。`,
         isChild
-            ? '全局限制：保持单镜头、正常速度和稳定空间连续性；角色身体比例自然，服装发型配饰保持连续；肢体与手指结构正确；不要新增背景人物、生活事件、突发互动或注意力转移；不出现文字、Logo、品牌或水印。'
-            : '全局限制：不要切镜、瞬移、随机推拉变焦、慢动作、人物僵住或只移动背景；不要换脸、脸部漂移、年龄变化、身材拉长、服装发型配饰变化、塑料皮肤；不要多余肢体、手指错误或人物克隆；不要新增背景人物、生活事件、突发互动或注意力转移；不要场景结构突变；不要文字、Logo、品牌或水印。',
+            ? '限制：保持正常速度、身体比例和造型连续；舞蹈健康、符合年龄但必须有明确节拍、脚步密度、方向变化与高潮；不新增人物或事件；不要文字、Logo、水印、肢体错误。'
+            : '限制：不要切镜、慢动作、僵住、换脸、年龄变化、身材拉长、造型变化、人物克隆或场景突变；不新增人物或事件；不要文字、Logo、水印。',
     ].join('\n\n');
 
     return { roleImagePrompt, firstFramePrompt, videoPrompt };
@@ -276,7 +281,7 @@ router.post('/analyze', async (req, res) => {
     const plannerModel = cleanString(req.body?.plannerModel, getKey('TEXT_MODEL') || 'grok-4.20-fast', 160);
     const timelineRanges = timelineRangesFor(duration);
     const timelineSkeleton = timelineRanges.map(([start, end], index) =>
-        `      {"action":"${start}-${end}秒的完整连续舞句；写清脚步、重心、上肢路径、朝向与能量变化${index === Math.floor(timelineRanges.length / 2) ? '，这里完成一次自然的舞段发展或方向变化' : ''}","connection":"承接上一段结尾的落脚、重心、朝向和动作惯性，并写清本段结尾如何交给下一段","camera":"摄影如何被舞者的连续运动带动","environment":"保持稳定的场景与灯光"}`
+        `      {"counts":"按最终 BPM 标明本段覆盖的连续八拍范围","action":"${start}-${end}秒的完整连续舞句；逐拍写清左右脚、支撑脚、重心、膝髋躯干动力、手臂路径、朝向和能量变化${index === Math.floor(timelineRanges.length / 2) ? '，这里发展动作母题并完成方向或空间变化' : ''}","connection":"写清本段最后落脚、重心、朝向和手臂轨迹如何直接启动下一舞句"}`
     ).join(',\n');
     if (!digitalHumanImageUrl) return res.status(400).json({ error: '请上传数字人图片' });
     if (!getKey('TEXT_API_KEY')) return res.status(400).json({ error: '请先在设置中配置文字模型 API Key' });
@@ -303,75 +308,107 @@ router.post('/analyze', async (req, res) => {
             temperature: 0,
         });
         const ageGroup = cleanString(parseStructuredJson(ageReply)?.ageGroup, '无法确认', 30);
-        const danceDirection = chooseDanceDirection(ageGroup);
+        const directionOptions = danceDirectionOptions(ageGroup);
 
-        send({ type: 'status', stage: 1, message: `已判断年龄阶段：${ageGroup}；正在按“${danceDirection.split('：')[0]}”方向设计全新造型与编舞…` });
-        const reply = await textChat({
-            system: `你是拥有十年以上商业舞蹈广告经验的通用数字人造型策略师、服装搭配师、舞蹈编导、运动连续性导演和短视频摄影指导。你不会看到上传图片，只会收到可见年龄阶段，因此不得描述或沿用原图的脸部、身份、性别、民族、健康、气质、身材、体型、姿态、服装、发型、配饰、表情、构图、场景或背景。
+        send({ type: 'status', stage: 1, message: `已判断年龄阶段：${ageGroup}；正在单独规划全新造型与场景…` });
+        const stylingReply = await textChat({
+            system: `你是拥有十五年以上商业广告经验的数字人造型策略师、服装搭配师和生活方式摄影指导。你只负责服装、发型、配饰、表情基调、真实场景、灯光和手机摄影方案，不负责设计舞步。
 
-任务目标：仅依据年龄阶段，为数字人建立符合大众审美、真实可穿、上镜协调的新造型，并设计一支自然流畅、具有统一律动和完整发展弧线的一镜到底短视频舞蹈。结果必须能直接用于 AI 生图和视频生成。
+你不会看到上传图片，只会收到可见年龄阶段，不得描述或沿用原图的脸部、身份、性别、民族、身材、体型、姿态、服装、发型、配饰、表情、构图、场景或背景。
 
-专业设计框架：
-1. 年龄分支：儿童或青少年采用符合年龄、健康得体的造型和低冲击编舞，但低冲击不等于缓慢、呆板或动作稀少，仍需有清楚律动、连续脚步、方向变化和高潮；成年人不套用儿童动作限制，可采用更丰富的力量、幅度、躯干律动与空间移动，但不过度挑逗或低俗。
-2. 大众审美搭配：整套服饰必须是现实品牌和商场中常见、真实可买到的日常穿搭，耐看、比例协调并适合舞动，同时具有自然的小网红穿搭辨识度，而不是普通校服、幼儿园服或批量儿童模板。主色通常不超过三种，只设一个视觉重点，其余单品负责平衡；上衣、下装或连衣单品、外搭、袜鞋、发型、少量配饰必须有清楚的风格与季节逻辑。儿童也不能默认生成幼儿园围裙、背带围裙、演出服、卡通徽章堆叠、糖果色全套或刻意卖萌发箍；成年人不能默认网红露肤套装。避免高饱和撞色、舞台戏服感、随机配饰、多个视觉重点、上下装比例失衡或鞋服风格冲突。
-3. 舞种与律动：先确定一个贯穿全程的核心 groove，再确定一至两个可识别的动作母题；后续通过方向、幅度、层级和速度变奏发展，而不是不断换新动作。
-4. 连续编舞：每段必须继承上一段结尾的落脚、重心、朝向、手臂轨迹和运动惯性。用顺势迈步、重心反弹、身体扭转、手臂延长或收回完成过渡，不允许回到中立站姿再开始下一动作。
-5. 自然动作质量：动作要有启动、经过和收势，上下肢协调，重心真实落在支撑脚上。禁止“摆姿势—停顿—换姿势”、连续几个硬手势、机械左右复制、频繁定格、突然甩头、无准备旋转、只有手动脚不动，或把两秒动作拖满整段。
-6. 节奏结构：整支舞必须有起拍、建立律动、发展、方向或空间变化、高潮和收尾；时间段只是时间标记，不是独立动作卡。动作密度与 BPM 匹配，转场发生在动作内部。
-7. 真实影像：造型定稿照与首帧都必须像审美良好的家人或朋友用手机后置主摄拍到的真实生活画面，而不是 AI 儿童样片、影棚写真或童装目录。场景应干净、有审美、有真实使用痕迹、明确光源方向和空间层次，优先选择有自然侧光、材质层次和安全舞动空间的真实地点；不使用旧学校走廊、医院或机构走廊、过度干净的奶油色样板间、全景均匀暖黄光、虚假柔焦、完美对称构图或与服装同色系的刻意布景。保留自然皮肤与发丝、真实衣料褶皱、鞋底受力、局部曝光差异和适量环境细节。
-8. 镜头与场景：舞者运动带动镜头，摄影只做必要的后退、横移和小幅绕行；全程保留脚部。场景只提供舞动空间与氛围，不得设计生活事件、背景人物插曲、道具突发变化、额外互动或注意力转移。
+整套造型必须符合大众审美、现实可买、比例协调、方便舞动，并有自然的小网红辨识度。主色不超过三种，只设一个视觉重点。儿童不得套用幼儿园围裙、背带围裙、演出服、卡通徽章堆叠、糖果色全套或刻意卖萌发箍；成年人不得默认网红露肤套装。场景必须有真实使用痕迹、明确光源和完整全身舞动空间，避免奶油色空样板间、影棚均匀暖光、机构走廊和童装目录质感。
 
-舞风多样性规则：严格围绕本次给定的舞风方向创作，不得无视方向并默认输出“K-pop 弹步舞”“step-touch 加手势”或通用短视频流行舞。除非本次方向明确要求，否则不要使用 K-pop 标签。核心脚步、身体动力和动作母题必须体现该舞种本身的节奏特征。
-
-质量标准：描述必须具体到脚步、支撑脚、重心方向、身体朝向、手臂路径、动作动力和段落衔接。禁止使用“跳一段好看的舞”“自然流畅”“高级感”等无法执行的空泛描述。只输出严格 JSON，不要 Markdown 或解释。`,
+只输出严格 JSON，不要 Markdown 或解释。`,
             prompt: `可见年龄阶段：${ageGroup}。
-本次舞风方向：${danceDirection}。
 
-为该年龄阶段的数字人规划一条 ${duration} 秒、${ASPECT_RATIO}、一镜到底的真实生活感舞蹈视频。不要输出人物视觉分析，只输出：
+只规划造型与场景：
 {
   "roleSetting": {
-    "theme": "主题",
-    "outfit": "从上到下完整服装与材质颜色",
-    "stylingLogic": "说明主辅色、轮廓比例、视觉重点、材质与鞋履为何符合大众审美并适合舞动",
-    "hairstyle": "发型",
-    "accessories": "配饰",
-    "expressionStyle": "表情风格",
-    "scene": "有空间结构和可互动环境元素的真实生活场景",
-    "lighting": "灯光",
-    "colorPalette": "色彩",
-    "cameraLanguage": "手机竖屏一镜到底的机位、距离和跟拍方式",
-    "danceStyle": "严格基于本次舞风方向进一步具体化，写明核心身体动力和脚步体系，不得改回默认 K-pop 或通用 step-touch",
-    "tempoBpm": 118
-  },
+    "theme": "生活化视觉主题",
+    "outfit": "从上到下的完整服装、材质与颜色",
+    "stylingLogic": "主辅色、轮廓比例、视觉重点、材质与鞋履逻辑",
+    "hairstyle": "全新发型",
+    "accessories": "少量协调配饰",
+    "expressionStyle": "自然表情基调",
+    "scene": "有真实使用痕迹和完整舞动空间的生活场景",
+    "lighting": "明确的真实光源",
+    "colorPalette": "真实克制的色彩",
+    "cameraLanguage": "9:16 手机一镜到底的机位、距离与跟拍原则"
+  }
+}`,
+            model: plannerModel,
+            label: '数字人造型与场景规划',
+            maxTokens: 3500,
+            temperature: 0.55,
+            onDelta: (_delta, total) => {
+                if (total % 500 < 30) send({ type: 'progress', stage: 1, chars: total });
+            },
+        });
+        const styling = parseStructuredJson(stylingReply);
+        const stylingRole = styling?.roleSetting && typeof styling.roleSetting === 'object'
+            ? styling.roleSetting
+            : {};
+
+        send({ type: 'status', stage: 2, message: '第 2/3 步：二十年资深编舞总监正在按八拍设计完整舞句…' });
+        const choreographyReply = await textChat({
+            system: `你是一名拥有二十年舞台、MV、商业广告与短视频编舞经验的资深编舞总监，熟悉儿童爵士、Funk、Disco、House、Jazz Funk、Commercial Jazz、R&B、Latin Pop 和 Contemporary。你的唯一任务是设计一支真人能够在指定时长与 BPM 下连续完成的完整舞蹈；你不负责重新设计服装、场景、灯光或摄影。
+
+编舞方法：
+1. 先从允许的舞风中选择最适合既定造型与场景的一种，不得固定使用 K-pop、通用 step-touch、摆手势或原地弹步。
+2. 先建立从第一拍持续到最后一拍的核心 groove，再建立一至两个动作母题；后续只通过方向、幅度、层级、速度和空间路线发展母题。
+3. 以 4/4 拍和八拍舞句组织编舞。每个舞句写清拍数、左右脚顺序、支撑脚、重心转移、膝髋躯干动力、手臂路径、朝向、能量变化以及结尾落脚。
+4. 每句必须从上一句的落脚、支撑脚、重心、朝向、手臂轨迹与运动惯性直接启动，禁止回到中立站姿再摆下一个动作。
+5. 动作必须有启动、经过和收势，上下肢协同。禁止摆姿势—停顿—换姿势、连续硬手势、机械镜像复制、频繁定格、无准备旋转、只有手动脚不动或把两秒动作拖满整段。
+6. 儿童或青少年编舞要健康、符合年龄、避免高风险动作，但仍必须轻快、有弹性、有连续脚步、有方向变化和清楚高潮；安全不等于缓慢、僵硬或动作稀少。成年人可使用更丰富的力量、幅度、躯干律动与空间移动，但不过度挑逗。
+7. 整支舞必须具备起拍、groove 建立、发展、方向或空间变化、高潮和完整收尾。输出的是舞谱，不是镜头清单。
+
+质量标准：让专业舞者照文字能够实际跳出来。禁止“跳得自然好看”“做流畅动作”等空话。只输出严格 JSON，不要 Markdown 或解释。`,
+            prompt: `可见年龄阶段：${ageGroup}。
+成片时长：${duration} 秒。
+既定造型与场景（只能适配，不得改写）：
+${JSON.stringify(stylingRole)}
+
+允许选择的舞风：
+- ${directionOptions.join('\n- ')}
+
+请根据场景空间、服装活动度与年龄，从以上舞风中选择最合适的一种并具体化。输出：
+{
+  "danceStyle": "选定舞种、核心身体动力与脚步体系",
+  "tempoBpm": 118,
   "storyboard": {
     "danceName": "原创舞名",
-    "coreGroove": "贯穿全片的核心律动，写清膝部弹性、重心节奏和身体动力",
-    "movementMotif": "一至两个重复发展而非机械重复的动作母题",
-    "rhythmArc": "整条节奏弧线",
+    "coreGroove": "贯穿全片的基础律动与重心节奏",
+    "movementMotif": "一至两个可以连续变奏的动作母题",
+    "rhythmArc": "从起拍到高潮和收尾的能量弧线",
     "timeline": [
 ${timelineSkeleton}
     ]
   }
 }
 
-要求：服装先按真实大众穿搭逻辑完成单品组合，不得套用幼儿园围裙、卡通徽章、糖果色鞋、舞台演出服或模板化儿童造型；场景必须有真实使用痕迹和明确自然光或现场光来源，不得使用奶油色空样板间或影棚式均匀暖光。${timelineRanges.length} 段合起来是同一支舞，不是动作清单。相邻两段的结束状态和开始状态必须物理连续，不能重置姿势；每段都写明脚步、支撑脚、重心、朝向、上肢路径、动力和与前后段的衔接。必须有统一核心律动、动作母题的自然变奏、舞段发展、高潮和结尾；不用慢动作填时长；全程不加入生活事件、路人插曲、道具突发变化、额外互动或注意力转移。`,
+${timelineRanges.length} 个时间段只是同一支舞的连续舞句标记。根据你选择的 BPM，为每段填写合理的八拍范围；动作密度必须足以形成舞蹈，但不要塞入无法在对应秒数内完成的动作。`,
             model: plannerModel,
-            label: '数字人造型与编舞规划',
-            maxTokens: 9000,
-            temperature: 0.65,
+            label: '二十年资深编舞规划',
+            maxTokens: 6000,
+            temperature: 0.6,
             onDelta: (_delta, total) => {
-                if (total % 500 < 30) send({ type: 'progress', stage: 1, chars: total });
+                if (total % 500 < 30) send({ type: 'progress', stage: 2, chars: total });
             },
         });
+        const choreography = parseStructuredJson(choreographyReply);
+        const danceDirection = cleanString(choreography?.danceStyle, directionOptions[0], 300);
 
-        send({ type: 'status', stage: 2, message: '第 2/3 步：正在锁定角色设定和精确首帧…' });
+        send({ type: 'status', stage: 3, message: `第 3/3 步：正在整理 ${duration} 秒连续八拍舞谱与生成提示词…` });
         const plan = normalizePlan({
-            ...parseStructuredJson(reply),
+            roleSetting: {
+                ...stylingRole,
+                danceStyle: danceDirection,
+                tempoBpm: choreography?.tempoBpm,
+            },
+            storyboard: choreography?.storyboard,
             characterProfile: { ageGroup },
         }, duration, danceDirection);
         const prompts = buildPrompts(plan, duration);
-
-        send({ type: 'status', stage: 3, message: `第 3/3 步：正在生成 ${duration} 秒编舞故事板…` });
         send({
             type: 'done',
             data: {
@@ -393,3 +430,9 @@ ${timelineSkeleton}
 });
 
 export default router;
+export {
+    buildPrompts,
+    danceDirectionOptions,
+    normalizePlan,
+    timelineRangesFor,
+};

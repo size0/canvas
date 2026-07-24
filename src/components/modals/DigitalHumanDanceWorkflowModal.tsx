@@ -7,6 +7,7 @@ import {
 export interface DanceTimelineItem {
     startSec: number;
     endSec: number;
+    counts: string;
     action: string;
     connection: string;
     camera: string;
@@ -70,8 +71,8 @@ interface DigitalHumanDanceWorkflowModalProps {
 
 const PIPELINE = [
     { label: '年龄与脸部', desc: '只判断年龄，保留同一张脸', icon: ScanFace },
-    { label: '精确首帧', desc: '锁定场景、机位和起拍姿势', icon: ImageIcon },
-    { label: '编舞故事板', desc: '节拍、运镜与连续舞段', icon: Music2 },
+    { label: '造型与场景', desc: '服装、发型、配饰和空间', icon: ImageIcon },
+    { label: '八拍编舞', desc: '资深编舞总监设计连续舞句', icon: Music2 },
     { label: 'Grok 成片', desc: '9:16、一镜到底', icon: Film },
 ];
 
@@ -348,7 +349,7 @@ export const DigitalHumanDanceWorkflowModal: React.FC<DigitalHumanDanceWorkflowM
                             <div className="rounded-xl border border-white/[0.07] bg-black/25 p-4">
                                 <div className="flex items-center gap-2 text-xs font-medium text-white"><Sparkles size={14} className="text-amber-300" />系统会自动决定</div>
                                 <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                                    {['大众审美服装搭配', '协调发型与配饰', '匹配的真实舞蹈场景', '明确舞种与 BPM', `${duration} 秒连续舞句`, '核心律动与自然衔接'].map(item => (
+                                    {['大众审美服装搭配', '协调发型与配饰', '匹配的真实舞蹈场景', '独立选择舞种与 BPM', `${duration} 秒八拍舞句`, '核心 groove 与连续变奏'].map(item => (
                                         <div key={item} className="rounded-lg border border-white/[0.05] bg-white/[0.025] px-2.5 py-2 text-neutral-400">{item}</div>
                                     ))}
                                 </div>
