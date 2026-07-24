@@ -3,9 +3,10 @@
  *
  * Runtime configuration store for API keys and related settings.
  *
- * Keys are read dynamically from a writable JSON config file so that the
- * in-app Settings page can update them without restarting the server.
- * Resolution order for any key: config.json value > process.env value > ''.
+ * Non-secret settings can be updated from the in-app Settings page.
+ * API keys are managed by the server environment and are never persisted by
+ * this module or returned to the browser.
+ * Resolution order for any key: process.env value > config.json value > ''.
  *
  * When packaged as a desktop app (Electron), the main process sets
  * CONFIG_DIR to a writable user-data location.
@@ -41,6 +42,9 @@ export const SETTINGS_KEYS = [
     'GEN_CONCURRENCY',
 ];
 
+export const SECRET_SETTING_KEYS = SETTINGS_KEYS.filter(key => key.endsWith('_API_KEY'));
+const SECRET_SETTING_KEY_SET = new Set(SECRET_SETTING_KEYS);
+
 // 默认值（当配置文件与环境变量都未设置时使用）
 export const DEFAULTS = {
     TEXT_API_URL: 'https://www.gpt2api.com/v1',
@@ -71,21 +75,22 @@ export function loadConfig() {
 }
 
 /**
- * Resolves a single key: config file value first, then environment variable.
+ * Resolves a single key: environment variable first, then config file.
  * @param {string} name
  * @returns {string}
  */
 export function getKey(name) {
+    if (process.env[name]) return process.env[name];
     const cfg = loadConfig();
     const fromFile = cfg[name];
     if (fromFile !== undefined && fromFile !== null && fromFile !== '') return String(fromFile);
-    if (process.env[name]) return process.env[name];
     return DEFAULTS[name] || '';
 }
 
 /**
  * Merges and persists the provided settings into the config file.
- * Only known keys are written. Empty strings are stored as-is (clears a key).
+ * API keys are always ignored and removed from the writable config file.
+ * Empty non-secret strings are stored as-is (clears a key).
  * @param {Record<string, string>} updates
  * @returns {Record<string, string>} the merged config
  */
@@ -93,7 +98,12 @@ export function saveConfig(updates) {
     const current = loadConfig();
     const merged = { ...current };
 
+    for (const key of SECRET_SETTING_KEYS) {
+        delete merged[key];
+    }
+
     for (const key of SETTINGS_KEYS) {
+        if (SECRET_SETTING_KEY_SET.has(key)) continue;
         if (Object.prototype.hasOwnProperty.call(updates || {}, key)) {
             const value = updates[key];
             merged[key] = value == null ? '' : String(value);
@@ -112,13 +122,27 @@ export function saveConfig(updates) {
 }
 
 /**
- * Returns the current resolved values for all settings keys.
+ * Returns only browser-safe settings. Secret keys are never included.
  * @returns {Record<string, string>}
  */
-export function getAllSettings() {
+export function getPublicSettings() {
     const result = {};
     for (const key of SETTINGS_KEYS) {
-        result[key] = getKey(key);
+        if (!SECRET_SETTING_KEY_SET.has(key)) {
+            result[key] = getKey(key);
+        }
+    }
+    return result;
+}
+
+/**
+ * Returns whether each secret is configured without exposing its value.
+ * @returns {Record<string, boolean>}
+ */
+export function getSecretStatus() {
+    const result = {};
+    for (const key of SECRET_SETTING_KEYS) {
+        result[key] = Boolean(getKey(key));
     }
     return result;
 }

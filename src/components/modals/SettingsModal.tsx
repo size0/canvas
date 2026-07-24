@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Loader2, X, Eye, EyeOff } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -83,7 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const [saving, setSaving] = useState(false);
     const [savedTip, setSavedTip] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+    const [secretStatus, setSecretStatus] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         if (!isOpen) return;
@@ -94,6 +94,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             .then(res => res.json())
             .then(data => {
                 if (data && data.settings) setValues(data.settings);
+                setSecretStatus(data?.secretStatus || {});
             })
             .catch(err => setError('读取设置失败：' + err.message))
             .finally(() => setLoading(false));
@@ -104,18 +105,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setSavedTip(false);
     };
 
-    const toggleReveal = (key: string) => {
-        setRevealed(prev => ({ ...prev, [key]: !prev[key] }));
-    };
-
     const handleSave = async () => {
         try {
             setSaving(true);
             setError(null);
+            const publicSettings = Object.fromEntries(
+                Object.entries(values).filter(([key]) => !SECRET_KEYS.has(key))
+            );
             const res = await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ settings: values }),
+                body: JSON.stringify({ settings: publicSettings }),
             });
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -139,7 +139,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800">
                     <div>
                         <h2 className="text-lg font-semibold text-white">设置</h2>
-                        <p className="text-xs text-neutral-500 mt-0.5">密钥仅保存在本机，保存后立即生效</p>
+                        <p className="text-xs text-neutral-500 mt-0.5">API 密钥由服务器环境变量管理，页面不会读取或保存明文密钥</p>
                     </div>
                     <button
                         onClick={onClose}
@@ -164,32 +164,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                 <div className="space-y-3">
                                     {group.fields.map(field => {
                                         const isSecret = SECRET_KEYS.has(field.key);
-                                        const show = revealed[field.key];
                                         return (
                                             <div key={field.key}>
                                                 <label className="block text-xs text-neutral-400 mb-1">{field.label}</label>
                                                 <div className="relative">
                                                     <input
-                                                        type={isSecret && !show ? 'password' : 'text'}
-                                                        value={values[field.key] || ''}
-                                                        placeholder={field.placeholder || '未设置'}
-                                                        onChange={(e) => handleChange(field.key, e.target.value)}
+                                                        type="text"
+                                                        value={isSecret
+                                                            ? (secretStatus[field.key] ? '已通过服务器环境变量配置' : '服务器环境变量未配置')
+                                                            : (values[field.key] || '')}
+                                                        placeholder={isSecret ? '请在服务器环境变量中配置' : (field.placeholder || '未设置')}
+                                                        onChange={(e) => {
+                                                            if (!isSecret) handleChange(field.key, e.target.value);
+                                                        }}
+                                                        disabled={isSecret}
                                                         autoComplete="off"
                                                         spellCheck={false}
-                                                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 pr-10 text-sm text-white outline-none focus:border-blue-500 transition-colors"
+                                                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none transition-colors ${
+                                                            isSecret
+                                                                ? 'bg-neutral-950 border-neutral-800 text-neutral-500 cursor-not-allowed'
+                                                                : 'bg-neutral-900 border-neutral-700 text-white focus:border-blue-500'
+                                                        }`}
                                                     />
-                                                    {isSecret && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => toggleReveal(field.key)}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
-                                                            title={show ? '隐藏' : '显示'}
-                                                        >
-                                                            {show ? <EyeOff size={16} /> : <Eye size={16} />}
-                                                        </button>
-                                                    )}
                                                 </div>
-                                                {field.hint && <p className="text-[11px] text-neutral-600 mt-1">{field.hint}</p>}
+                                                <p className="text-[11px] text-neutral-600 mt-1">
+                                                    {isSecret ? `环境变量：${field.key}` : field.hint}
+                                                </p>
                                             </div>
                                         );
                                     })}

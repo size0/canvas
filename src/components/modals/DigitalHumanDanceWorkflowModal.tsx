@@ -115,9 +115,10 @@ export const DigitalHumanDanceWorkflowModal: React.FC<DigitalHumanDanceWorkflowM
             .then(data => {
                 if (!active) return;
                 const settings = data?.settings || {};
+                const secretStatus = data?.secretStatus || {};
                 setPlannerModel(String(settings.TEXT_MODEL || 'grok-4.20-fast'));
                 setPlannerApiUrl(String(settings.TEXT_API_URL || ''));
-                setPlannerKeyConfigured(Boolean(String(settings.TEXT_API_KEY || '').trim()));
+                setPlannerKeyConfigured(Boolean(secretStatus.TEXT_API_KEY));
             })
             .catch(() => {
                 if (active) setPlannerKeyConfigured(null);

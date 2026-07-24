@@ -20,7 +20,13 @@ import promptTemplatesRoutes from './routes/prompt-templates.js';
 import productWorkflowRoutes from './routes/product-workflow.js';
 import productTemplatesRoutes from './routes/product-templates.js';
 import digitalHumanDanceRoutes from './routes/digital-human-dance.js';
-import { getKey, getAllSettings, saveConfig, SETTINGS_KEYS } from './config.js';
+import {
+    getKey,
+    getPublicSettings,
+    getSecretStatus,
+    saveConfig,
+    SETTINGS_KEYS,
+} from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,8 +79,8 @@ const KLING_BASE_URL = 'https://api-singapore.klingai.com';
 // ============================================================================
 // API KEY CONFIGURATION
 // ----------------------------------------------------------------------------
-// Keys are resolved dynamically (config file > environment) so the in-app
-// Settings page can update them without restarting the server.
+// Secrets come from the server environment. Non-secret settings may still be
+// updated from the in-app Settings page without restarting the server.
 // ============================================================================
 
 // Expose every settings key to route modules via app.locals as live getters,
@@ -112,22 +118,31 @@ applyConfigToEnv();
 // SETTINGS API (read/write API keys from the in-app Settings page)
 // ============================================================================
 
-// Return current values for all settings keys (localhost desktop app).
+// Return browser-safe settings and secret presence only.
 app.get('/api/settings', (req, res) => {
     try {
-        res.json({ success: true, settings: getAllSettings(), keys: SETTINGS_KEYS });
+        res.json({
+            success: true,
+            settings: getPublicSettings(),
+            secretStatus: getSecretStatus(),
+            keys: SETTINGS_KEYS,
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// Persist updated settings. Takes effect immediately (no restart needed).
+// Persist non-secret settings. API keys are environment-managed and ignored.
 app.post('/api/settings', (req, res) => {
     try {
         const updates = (req.body && req.body.settings) ? req.body.settings : req.body;
-        const merged = saveConfig(updates || {});
+        saveConfig(updates || {});
         applyConfigToEnv();
-        res.json({ success: true, settings: merged });
+        res.json({
+            success: true,
+            settings: getPublicSettings(),
+            secretStatus: getSecretStatus(),
+        });
     } catch (error) {
         res.status(500).json({ error: error.message || 'Failed to save settings' });
     }
